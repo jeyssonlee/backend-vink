@@ -1,0 +1,19 @@
+### 1. Ver Facturas Pendientes
+PATCH  http://localhost:3000/compras/F-TEST-2026/anular
+###
+
+GET http://localhost:3000/proveedores
+
+### 2. Simular envío desde Sucursal
+### Enviar Venta desde Sucursal (Webhook)
+POST http://localhost:3000/usuarios
+Content-Type: application/json
+
+{
+  "nombre_completo": "Juan Pérez",
+  "correo": "juan@empresa.com",
+  "clave": "secreto123",
+  "rol": "VENDEDOR",
+  "id_empresa": "1"
+}
+
