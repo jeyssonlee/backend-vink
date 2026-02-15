@@ -29,6 +29,7 @@ export class SyncService {
       this.logger.log(`✅ Pedido ${msg.id_pedido_local} registrado y stock APARTADO`);
     } catch (error) {
       this.logger.error(`❌ Error en Sync (Venta): ${error.message}`);
+      throw error;
     }
   }
 
@@ -47,7 +48,8 @@ export class SyncService {
     queue: 'queue.sync.ventas.anulaciones',
   })
   async handleRabbitAnular(msg: any) {
-    await this.anularPedido(msg);
+    const result = await this.anularPedido(msg);
+    if (!result.success) throw new Error(result.message);
   }
 
   @RabbitSubscribe({
@@ -56,7 +58,8 @@ export class SyncService {
     queue: 'queue.sync.ventas.finalizar',
   })
   async handleRabbitFinalizar(msg: any) {
-    await this.finalizarVenta(msg);
+    const result = await this.finalizarVenta(msg);
+    if (!result.success) throw new Error(result.message);
   }
 
   // ======================================================
