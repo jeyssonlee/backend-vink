@@ -70,7 +70,7 @@ export class FacturasService {
             if (!producto) throw new NotFoundException(`Producto ${itemDto.id_producto} no encontrado`);
 
             // Usar precio personalizado SI existe, sino el precio base del producto
-            const precioFinal = itemDto.precio_personalizado ?? producto.precios;
+            const precioFinal = itemDto.precio_personalizado ?? producto.precio_base;
 
             itemsProcesar.push({
                 producto: producto,
