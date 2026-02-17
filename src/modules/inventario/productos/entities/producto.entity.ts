@@ -30,6 +30,9 @@ export class Producto {
   proveedor: string;
 
   @Column({ type: 'text', nullable: true })
+  imagen: string;
+
+  @Column({ type: 'text', nullable: true })
   descripcion: string;
 
   @OneToMany(() => Inventario, (inventario) => inventario.producto)

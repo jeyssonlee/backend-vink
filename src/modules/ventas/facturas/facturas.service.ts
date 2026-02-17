@@ -165,6 +165,9 @@ export class FacturasService {
           estadoFinal = EstadoFactura.PENDIENTE;
       }
 
+      const saldoInicial = estadoFinal === EstadoFactura.PENDIENTE ? totalPagar : 0;
+      const pagadoInicial = estadoFinal === EstadoFactura.PAGADA ? totalPagar : 0;
+
       const datosFactura: import('typeorm').DeepPartial<Factura> = {
         serie,
         numero_consecutivo: numeroConsecutivo ?? undefined,
@@ -172,6 +175,8 @@ export class FacturasService {
         descuento_global_monto: descuentoGlobal,
         monto_iva: montoIva,
         total_pagar: totalPagar,
+        monto_pagado: pagadoInicial,
+        saldo_pendiente: saldoInicial,
         total_costo: totalCosto,
         total_ganancia: totalGanancia - descuentoGlobal,
         metodo_pago: dto.metodo_pago,

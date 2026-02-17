@@ -41,4 +41,8 @@ export class CreateProductoDto {
   @IsString()
   @IsOptional()
   proveedor?: string;
+
+  @IsString()
+  @IsOptional()
+  imagen?: string;
 }

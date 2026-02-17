@@ -31,7 +31,7 @@ export class PedidosController {
   async anular(@Param('id_local') idPedidoLocal: string, @Req() req) {
     const idEmpresa = req.user.id_empresa;
     if (!idEmpresa) throw new UnauthorizedException('No tienes empresa asignada');
-    return await this.pedidosService.anularPedido(idPedidoLocal, idEmpresa);
+    return await this.pedidosService.anularPedido(idPedidoLocal);
   }
 
   @Patch(':id_local/completar')
@@ -39,5 +39,10 @@ export class PedidosController {
     const idEmpresa = req.user.id_empresa;
     if (!idEmpresa) throw new UnauthorizedException('No tienes empresa asignada');
     return await this.pedidosService.completarVenta(idPedidoLocal, idEmpresa);
+  }
+
+  @Patch(':id')
+  async actualizar(@Param('id') id: string, @Body() updateDto: CreatePedidoDto) {
+    return await this.pedidosService.actualizarPedido(id, updateDto);
   }
 }

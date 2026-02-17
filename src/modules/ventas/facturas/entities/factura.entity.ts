@@ -3,6 +3,8 @@ import { Cliente } from '../../clientes/entities/clientes.entity';
 import { Empresa } from 'src/modules/core/empresa/entities/empresa.entity'; 
 import { Usuario } from '../../../core/usuarios/entities/usuarios.entity';
 import { FacturaDetalle } from './factura-detalle.entity';
+// 👇 Importamos la nueva entidad de historial de pagos
+import { CobranzaFactura } from 'src/modules/cobranzas/entities/cobranza-factura.entity';
 
 export enum MetodoPago {
   EFECTIVO = 'EFECTIVO',
@@ -12,14 +14,15 @@ export enum MetodoPago {
   PUNTO_VENTA = 'PUNTO_VENTA',
   CREDITO = 'CREDITO', 
   MIXTO = 'MIXTO',
-  POR_DEFINIR = 'POR_DEFINIR' // Para borradores
+  POR_DEFINIR = 'POR_DEFINIR' 
 }
 
 export enum EstadoFactura {
-  BORRADOR = 'BORRADOR',     // Guardada sin valor fiscal
-  PENDIENTE = 'PENDIENTE',   // Crédito / Por Cobrar
-  PAGADA = 'PAGADA',         // Cobrada y Cerrada
-  ANULADA = 'ANULADA'        // Reversada
+  BORRADOR = 'BORRADOR',     
+  PENDIENTE = 'PENDIENTE',   
+  PARCIAL = 'PARCIAL',       // 👈 NUEVO: Se abonó algo, pero falta
+  PAGADA = 'PAGADA',         
+  ANULADA = 'ANULADA'        
 }
 
 @Entity('facturas')
@@ -32,10 +35,10 @@ export class Factura {
   serie: string; 
 
   @Column({ type: 'int', nullable: true }) 
-  numero_consecutivo: number; // Solo existe si NO es borrador
+  numero_consecutivo: number; 
 
   @Column({ nullable: true })
-  numero_control: string; // Nro de imprenta (Venezuela)
+  numero_control: string; 
 
   // --- DATOS ECONÓMICOS ---
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
@@ -48,17 +51,24 @@ export class Factura {
   monto_iva: number;
 
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
-  total_pagar: number;
+  total_pagar: number; // DEUDA ORIGINAL
+
+  // 👇 MEMORIA FINANCIERA (NUEVO)
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  monto_pagado: number; // Sumatoria de cobros APLICADOS
 
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
-  tasa_cambio: number; // Snapshot del dólar al momento
-
-  // --- KPI / PROFIT (Inteligencia de Negocios) ---
-  @Column('decimal', { precision: 12, scale: 2, default: 0 })
-  total_costo: number; // Suma de costos históricos
+  saldo_pendiente: number; // total_pagar - monto_pagado
 
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
-  total_ganancia: number; // La utilidad neta real
+  tasa_cambio: number; 
+
+  // --- KPI / PROFIT ---
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  total_costo: number; 
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  total_ganancia: number; 
 
   // --- ESTADOS Y TIEMPOS ---
   @Column({ type: 'enum', enum: MetodoPago, default: MetodoPago.POR_DEFINIR })
@@ -86,6 +96,10 @@ export class Factura {
   @OneToMany(() => FacturaDetalle, (detalle) => detalle.factura, { cascade: true })
   detalles: FacturaDetalle[];
 
+  // 👇 Relación con los Pagos (Auditoría)
+  @OneToMany(() => CobranzaFactura, (cf) => cf.factura)
+  pagos_aplicados: CobranzaFactura[];
+
   @ManyToOne(() => Cliente, { nullable: true })
   @JoinColumn({ name: 'id_cliente' })
   cliente: Cliente;
@@ -98,7 +112,6 @@ export class Factura {
   @JoinColumn({ name: 'id_vendedor' })
   vendedor: Usuario; 
   
-  // 🪄 Getter Virtual
   get numero_completo(): string {
     if (this.estado === EstadoFactura.BORRADOR || !this.numero_consecutivo) {
         return 'BORRADOR';

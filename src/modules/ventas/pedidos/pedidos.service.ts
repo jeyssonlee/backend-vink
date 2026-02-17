@@ -52,7 +52,7 @@ export class PedidosService {
 
   async obtenerTodos() {
     return await this.pedidoRepo.find({
-      relations: ['detalles', 'cliente', 'vendedor'], 
+      relations: ['detalles', 'detalles.producto', 'cliente', 'vendedor'],
       order: { fecha: 'DESC' },
     });
   }
@@ -130,81 +130,57 @@ export class PedidosService {
   }
 
   // 👇 LÓGICA DE ANULACIÓN (Mueve stock de Apartados a General)
-  async anularPedido(idPedidoLocal: string, idEmpresa: string) {
+  async anularPedido(idPedido: string) { // 👈 Usamos el ID estándar (UUID)
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
       // 1. Buscamos el pedido
-      const pedido = await queryRunner.manager.findOne(Pedido, {
-        where: { id_pedido_local: idPedidoLocal, id_empresa: idEmpresa },
-        relations: ['detalles', 'detalles.producto'],
+      // Usamos findOne normal, sin queryRunner.manager para evitar bloqueos innecesarios en lectura
+      // o puedes usar queryRunner.manager.findOne si prefieres consistencia total.
+      const pedido = await this.pedidoRepo.findOne({
+        where: [
+            { id_pedido: idPedido },         // Intenta por UUID
+            { id_pedido_local: idPedido }    // Intenta por ID Local (por si acaso)
+        ],
+        relations: ['detalles']
       });
 
-      if (!pedido) throw new Error(`Pedido no encontrado.`);
+      if (!pedido) throw new NotFoundException(`Pedido no encontrado.`);
       if (pedido.estado === 'ANULADO') throw new Error(`El pedido ya estaba anulado.`);
+      if (pedido.estado === 'COMPLETADO') throw new Error(`No se puede anular un pedido completado.`);
 
-      // 2. DETECTAR ALMACENES AUTOMÁTICAMENTE
-      const almacenApartados = await queryRunner.manager.query(`
-        SELECT id_almacen FROM almacenes 
-        WHERE id_empresa = $1 AND (nombre ILIKE '%APARTADO%' OR es_venta = false) 
-        LIMIT 1
-      `, [idEmpresa]);
-
-      const almacenGeneral = await queryRunner.manager.query(`
-        SELECT id_almacen FROM almacenes 
-        WHERE id_empresa = $1 AND es_venta = true 
-        LIMIT 1
-      `, [idEmpresa]);
-
-      if (!almacenApartados.length || !almacenGeneral.length) {
-        throw new Error('Configuración de almacenes incorrecta.');
-      }
-
-      const idOrigen = almacenApartados[0].id_almacen; // Sale de Apartados
-      const idDestino = almacenGeneral[0].id_almacen;  // Entra a Venta
-
-      // 3. TRANSFERENCIA DE STOCK 🔄
-      for (const detalle of pedido.detalles) {
-        // A. RESTAR del Almacén de Apartados
-        await queryRunner.manager.query(`
-          UPDATE inventarios 
-          SET cantidad = cantidad - $1, updated_at = NOW()
-          WHERE id_producto = $2 AND id_almacen = $3 AND id_empresa = $4
-        `, [detalle.cantidad, detalle.id_producto, idOrigen, idEmpresa]);
-
-        // B. SUMAR al Almacén General (Upsert)
-        const existeEnDestino = await queryRunner.manager.query(`
-           SELECT 1 FROM inventarios WHERE id_producto = $1 AND id_almacen = $2 LIMIT 1
-        `, [detalle.id_producto, idDestino]);
-
-        if (existeEnDestino.length > 0) {
-           await queryRunner.manager.query(`
-             UPDATE inventarios 
-             SET cantidad = cantidad + $1, updated_at = NOW()
-             WHERE id_producto = $2 AND id_almacen = $3 AND id_empresa = $4
-           `, [detalle.cantidad, detalle.id_producto, idDestino, idEmpresa]);
-        } else {
-           await queryRunner.manager.query(`
-             INSERT INTO inventarios (id_producto, id_almacen, id_empresa, cantidad, costo_unitario, created_at, updated_at)
-             SELECT $2, $3, $4, $1, costo_unitario, NOW(), NOW()
-             FROM inventarios WHERE id_producto = $2 AND id_almacen = $5 LIMIT 1
-           `, [detalle.cantidad, detalle.id_producto, idDestino, idEmpresa, idOrigen]);
+      // 2. REVERTIR STOCK (Usando el servicio oficial que conecta con KARDEX)
+      // Esto reemplaza todo tu bloque de SQL manual (pasos 2 y 3 anteriores)
+      if (pedido.detalles) {
+        for (const detalle of pedido.detalles) {
+           await this.productosService.revertirApartado(
+             detalle.id_producto,
+             Number(detalle.cantidad),
+             pedido.id_empresa,
+             queryRunner // ✅ Pasamos la transacción para que sea seguro
+           );
         }
       }
 
-      // 4. CAMBIAR ESTADO
-      pedido.estado = 'ANULADO';
-      await queryRunner.manager.save(pedido);
+      // 3. CAMBIAR ESTADO (Usando UPDATE directo)
+      // Usamos .update() para evitar el error de "id_pedido is null" que nos dio dolor de cabeza antes.
+      await queryRunner.manager.update(Pedido, pedido.id_pedido, { 
+          estado: 'ANULADO',
+          fecha: new Date() // Actualizamos fecha si quieres registrar cuándo se anuló
+      });
 
       await queryRunner.commitTransaction();
-      return { success: true, message: `Anulado: Stock movido de APARTADOS a GENERAL.` };
+      this.logger.log(`🚫 Pedido ${pedido.id_pedido} ANULADO y stock liberado en Kardex.`);
+      
+      return { success: true, message: `Pedido anulado y registrado en Kardex.` };
 
     } catch (error) {
       await queryRunner.rollbackTransaction();
       this.logger.error(`Error anulando pedido: ${error.message}`);
-      return { success: false, message: error.message };
+      // Lanza la excepción para que el Frontend reciba el error 400/500
+      throw error; 
     } finally {
       await queryRunner.release();
     }
@@ -225,6 +201,91 @@ export class PedidosService {
       return { success: true, message: `Finalizado correctamente.` };
     } catch (error) {
       return { success: false, message: error.message };
+    }
+  }
+
+  // 👇 MÉTODO CORREGIDO Y VERIFICADO
+  async actualizarPedido(idPedido: string, updateDto: CreatePedidoDto) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. LEER DATOS VIEJOS (Solo para saber qué stock devolver)
+      // Usamos 'getMany' o 'findOne' pero NO guardaremos este objeto después.
+      const pedidoOriginal = await this.pedidoRepo.findOne({
+        where: { id_pedido: idPedido },
+        relations: ['detalles']
+      });
+
+      if (!pedidoOriginal) throw new NotFoundException('Pedido no encontrado');
+      if (pedidoOriginal.estado !== 'APARTADO' && pedidoOriginal.estado !== 'PENDIENTE') {
+        throw new Error('Solo se pueden editar pedidos en estado APARTADO o PENDIENTE');
+      }
+
+      // 2. DEVOLVER STOCK VIEJO
+      if (pedidoOriginal.detalles) {
+        for (const detalle of pedidoOriginal.detalles) {
+          await this.productosService.revertirApartado(
+            detalle.id_producto,
+            Number(detalle.cantidad),
+            pedidoOriginal.id_empresa,
+            queryRunner
+          ); 
+        }
+      }
+
+      // 3. BORRAR DETALLES VIEJOS (Usando ID explícito para asegurar borrado)
+      // Usamos delete directo sin depender de relaciones de objetos
+      await queryRunner.manager.delete(PedidoDetalle, { id_pedido: idPedido });
+
+      // 4. INSERTAR NUEVOS DETALLES
+      let total = 0;
+      for (const item of updateDto.detalles) {
+        // A. Validar
+        await this.productosService.validarStock(item.id_producto, item.cantidad);
+
+        // B. Crear objeto (Sin relacionar con 'pedidoOriginal')
+        const nuevoDetalle = this.detalleRepo.create({
+          id_pedido: idPedido, // 👈 Relación por ID directa
+          id_producto: item.id_producto,
+          cantidad: item.cantidad,
+          precio_unitario: item.precio_unitario,
+        });
+        
+        // C. Guardar
+        await queryRunner.manager.save(nuevoDetalle);
+        
+        // D. Apartar Stock
+        await this.productosService.apartarStock(
+             item.id_producto, 
+             Number(item.cantidad), 
+             updateDto.id_empresa,
+             queryRunner
+        );
+
+        total += Number(item.cantidad) * Number(item.precio_unitario);
+      }
+
+      // 5. ACTUALIZAR CABECERA (Usando UPDATE directo)
+      // Esto evita que TypeORM intente guardar relaciones huerfanas
+      await queryRunner.manager.update(Pedido, idPedido, {
+          total: total,
+          fecha: new Date(), // Actualizamos fecha a 'ahora'
+          id_cliente: updateDto.id_cliente // Actualizamos cliente
+      });
+
+      await queryRunner.commitTransaction();
+      this.logger.log(`🔄 Pedido ${idPedido} actualizado correctamente.`);
+      
+      return { success: true, message: 'Pedido actualizado', id: idPedido };
+
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(`❌ Error actualizando pedido: ${error.message}`);
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
   }
 }
