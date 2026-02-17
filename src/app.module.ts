@@ -21,6 +21,7 @@ import { RolesModule } from './modules/auth/roles/roles.module';
 import { AlmacenesModule } from './modules/inventario/almacenes/almacenes.module';
 import { KardexModule } from './modules/inventario/kardex/kardex.module';
 import { FacturasModule } from './modules/ventas/facturas/facturas.module';
+import { CobranzasModule } from './modules/cobranzas/cobranzas.module';
 
 
 @Module({
@@ -59,7 +60,8 @@ import { FacturasModule } from './modules/ventas/facturas/facturas.module';
     RolesModule,
     AlmacenesModule,
     KardexModule,
-    FacturasModule 
+    FacturasModule,
+    CobranzasModule 
      ],
 })
 export class AppModule {}

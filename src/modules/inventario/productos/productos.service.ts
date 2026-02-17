@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, QueryRunner } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
@@ -537,5 +537,48 @@ export class ProductosService {
       errores: errores,
       detalles: detallesErrores
     };
+  }
+
+  // ======================================================
+  // MÉTODOS PARA GESTIÓN DE PEDIDOS (Validar y Devolver)
+  // ======================================================
+
+  // 1. Validar si hay suficiente stock disponible (Sin apartar)
+  async validarStock(idProducto: string, cantidadRequerida: number) {
+    // Usamos tu repo de inventario para buscar el stock disponible en almacén de venta
+    // Ojo: Aquí asumimos que quieres validar stock GLOBAL de venta, si manejas multi-empresa
+    // deberías pasar idEmpresa también, pero para mantener la firma simple buscaremos
+    // el inventario de venta de ese producto.
+    
+    // Mejor enfoque: Buscar el inventario de venta del producto. 
+    // Como tu entidad Inventario tiene relación con Almacen, filtramos por es_venta = true
+    const inventario = await this.inventarioRepo.findOne({
+      where: { 
+        producto: { id_producto: idProducto },
+        almacen: { es_venta: true } 
+      },
+      relations: ['producto']
+    });
+
+    if (!inventario) {
+       throw new BadRequestException(`Producto ${idProducto} no tiene inventario configurado o no existe.`);
+    }
+
+    if (Number(inventario.cantidad) < cantidadRequerida) {
+      throw new BadRequestException(
+        `Stock insuficiente para ${inventario.producto.nombre}. Disponible: ${inventario.cantidad}, Solicitado: ${cantidadRequerida}`
+      );
+    }
+    return true;
+  }
+
+  // 2. Devolver Stock (Reversa de apartarStock)
+  // Devuelve del almacén de "Apartados" al de "Ventas"
+  async devolverStock(idProducto: string, cantidad: number, idEmpresa: string, qr: QueryRunner) {
+    // Reutilizamos la lógica de revertirApartado que YA TIENES, pero le cambiamos el nombre o la llamamos desde aquí
+    // Fíjate que en tu código ya tienes 'revertirApartado'. Es exactamente lo que necesitamos.
+    // Así que podemos hacer un alias o simplemente llamar a esa función.
+    
+    return this.revertirApartado(idProducto, cantidad, idEmpresa, qr);
   }
 }

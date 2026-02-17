@@ -88,7 +88,7 @@ export class SyncService {
     try {
       if (!idEmpresa) throw new Error('El mensaje de anulación no contiene id_empresa');
 
-      const resultado = await this.pedidosService.anularPedido(id, idEmpresa);
+      const resultado = await this.pedidosService.anularPedido(id);
       
       if (resultado.success) {
         console.log(clc.green(`✅ ${resultado.message}`));
