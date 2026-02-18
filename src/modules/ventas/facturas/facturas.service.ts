@@ -22,7 +22,7 @@ export class FacturasService {
   // ==========================================================
   // 1. CREAR FACTURA
   // ==========================================================
-  async crear(dto: CrearFacturaDto) {
+  async crear(dto: CrearFacturaDto, usuario: any) {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -52,8 +52,6 @@ export class FacturasService {
 
       // --- CASO B: VENTA DIRECTA ---
       } else if (dto.items && dto.items.length > 0) {
-        
-        // 1. Validar Cliente (Obligatorio para facturar)
         if (!dto.id_cliente) throw new BadRequestException("El cliente es obligatorio para venta directa");
         
         cliente = await queryRunner.manager.findOne(Cliente, { 
@@ -61,24 +59,19 @@ export class FacturasService {
         });
         if (!cliente) throw new NotFoundException("Cliente no encontrado");
 
-        // 2. Preparar Items
         for (const itemDto of dto.items) {
             const producto = await queryRunner.manager.findOne(Producto, { 
                 where: { id_producto: itemDto.id_producto, empresa: { id: idEmpresa } } 
             });
-            
             if (!producto) throw new NotFoundException(`Producto ${itemDto.id_producto} no encontrado`);
 
-            // Usar precio personalizado SI existe, sino el precio base del producto
             const precioFinal = itemDto.precio_personalizado ?? producto.precio_base;
-
             itemsProcesar.push({
                 producto: producto,
                 cantidad: itemDto.cantidad,
                 precio: precioFinal
             });
         }
-
       } else {
         throw new BadRequestException("Datos insuficientes: Debe enviar id_pedido o una lista de items.");
       }
@@ -96,19 +89,14 @@ export class FacturasService {
             [prod.id_producto, idEmpresa]
         );
         
-        // 🛡️ CORRECCIÓN 1: Validar Costo (parseFloat puede dar NaN si viene basura)
         let costoUnitario = 0;
         if (costoData.length > 0 && costoData[0].costo_unitario != null) {
             costoUnitario = parseFloat(costoData[0].costo_unitario);
-            if (isNaN(costoUnitario)) costoUnitario = 0; // Protección extra
+            if (isNaN(costoUnitario)) costoUnitario = 0;
         }
 
-        // 🛡️ CORRECCIÓN 2: Validar Precio Venta y Cantidad
-        // Usamos ( || 0) para que si es undefined o null, se convierta en 0 antes de Number()
         const precioVenta = Number(item.precio || 0); 
         const cantidad = Number(item.cantidad || 0);
-        
-        // Ahora los cálculos son seguros
         const totalLinea = precioVenta * cantidad;
 
         subtotalBase += totalLinea;
@@ -122,8 +110,8 @@ export class FacturasService {
             cantidad: cantidad,
             precio_unitario: precioVenta,
             costo_historico: costoUnitario,
-            ganancia_neta: (precioVenta - costoUnitario) * cantidad, // Seguro
-            total_linea: totalLinea // Seguro
+            ganancia_neta: (precioVenta - costoUnitario) * cantidad,
+            total_linea: totalLinea
         });
         detallesFactura.push(detalle);
       }
@@ -134,13 +122,12 @@ export class FacturasService {
       const montoIva = baseImponible * 0.16;
       const totalPagar = baseImponible + montoIva;
 
-      // --- 🛡️ CONTROL DE NUMERACIÓN Y ESTADO ---
+      // Numeración
       const esBorrador = dto.estado === EstadoFactura.BORRADOR;
       let numeroConsecutivo: number | null = null; 
       let serie = 'A'; 
 
       if (!esBorrador) {
-        // 1. Obtener último número
         const ultima = await queryRunner.manager.findOne(Factura, {
             where: { empresa: { id: idEmpresa }, serie: serie },
             order: { numero_consecutivo: 'DESC' },
@@ -148,7 +135,6 @@ export class FacturasService {
         });
         numeroConsecutivo = ultima ? ultima.numero_consecutivo + 1 : 1;
 
-        // 2. Doble Check de Seguridad
         const duplicada = await queryRunner.manager.findOne(Factura, {
             where: { empresa: { id: idEmpresa }, serie: serie, numero_consecutivo: numeroConsecutivo }
         });
@@ -186,36 +172,29 @@ export class FacturasService {
         id_pedido_origen: dto.id_pedido,
         cliente: cliente as import('typeorm').DeepPartial<Factura>['cliente'],
         empresa: { id: idEmpresa } as import('typeorm').DeepPartial<Factura>['empresa'],
-        vendedor: { id_usuario: dto.id_usuario } as import('typeorm').DeepPartial<Factura>['vendedor'],
+        vendedor: usuario, // ✅ Aquí asignamos el vendedor correctamente
         detalles: detallesFactura
       };
 
       const nuevaFactura = queryRunner.manager.create(Factura, datosFactura);
       const facturaGuardada = await queryRunner.manager.save(nuevaFactura);
 
-      // --- MOVIMIENTO DE INVENTARIO ---
+      // Movimientos de Inventario
       if (!esBorrador) {
         if (dto.id_pedido) {
-            // CASO A: Venimos de un Pedido (Stock estaba 'Apartado', lo sacamos definitivamente)
             for (const det of detallesFactura) {
                 await this.productosService.finalizarSalida(
-                    det.producto.id_producto,
-                    det.cantidad,
-                    idEmpresa,
-                    queryRunner
+                    det.producto.id_producto, det.cantidad, idEmpresa, queryRunner
                 );
             }
             await queryRunner.manager.update(Pedido, dto.id_pedido, { estado: 'FACTURADO' as any });
-
         } else {
-            // CASO B: Venta Directa (Stock está 'Disponible', lo restamos del Almacén General)
             const almacenVenta = await queryRunner.manager.findOne(Almacen, {
                 where: { empresa: { id: idEmpresa }, es_venta: true }
             });
-            if (!almacenVenta) throw new ConflictException("No se encontró un Almacén de Venta configurado para descontar stock.");
+            if (!almacenVenta) throw new ConflictException("No se encontró un Almacén de Venta configurado.");
 
             for (const det of detallesFactura) {
-                // Restamos directamente de inventarios
                 await queryRunner.manager.query(`
                     UPDATE inventarios 
                     SET cantidad = cantidad - $1, updated_at = NOW()
@@ -237,7 +216,7 @@ export class FacturasService {
   }
 
   // ==========================================================
-  // 2. ANULAR FACTURA 🛡️
+  // 2. ANULAR FACTURA
   // ==========================================================
   async anular(idFactura: string, motivo: string, idUsuario: string, idEmpresa: string) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -245,7 +224,6 @@ export class FacturasService {
     await queryRunner.startTransaction();
 
     try {
-      // 1. Obtener Factura con Detalles
       const factura = await queryRunner.manager.findOne(Factura, {
         where: { id_factura: idFactura, empresa: { id: idEmpresa } },
         relations: ['detalles', 'detalles.producto']
@@ -253,19 +231,12 @@ export class FacturasService {
 
       if (!factura) throw new NotFoundException('Factura no encontrada');
 
-      // 2. Validaciones de Seguridad 🔒
-      if (factura.estado === EstadoFactura.ANULADA) {
-        throw new BadRequestException('Esta factura ya está anulada. No se puede anular dos veces.');
-      }
-      if (factura.estado === EstadoFactura.BORRADOR) {
-        throw new BadRequestException('Los borradores se eliminan, no se anulan.');
-      }
+      if (factura.estado === EstadoFactura.ANULADA) throw new BadRequestException('Esta factura ya está anulada.');
+      if (factura.estado === EstadoFactura.BORRADOR) throw new BadRequestException('Los borradores se eliminan, no se anulan.');
 
-      // 3. Revertir Stock (Devolver al Almacén de Venta) 📦
+      // Revertir Stock
       for (const det of factura.detalles) {
         if (det.producto) { 
-            // 🛑 CORREGIDO: Eliminamos el 5to argumento que causaba el error
-            // Se usarán solo 4 argumentos que es lo que acepta tu ProductosService actual.
             await this.productosService.revertirVenta(
                 det.producto.id_producto, 
                 Number(det.cantidad), 
@@ -275,14 +246,10 @@ export class FacturasService {
         }
       }
 
-      // 4. Actualizar Estado de Factura
       factura.estado = EstadoFactura.ANULADA;
-      
       this.logger.warn(`Factura ${factura.numero_completo} anulada por usuario ${idUsuario}. Motivo: ${motivo}`);
-
       await queryRunner.manager.save(factura);
 
-      // 5. Liberar Pedido (Opcional)
       if (factura.id_pedido_origen) {
          await queryRunner.manager.update(Pedido, factura.id_pedido_origen, { estado: 'ANULADO' as any });
       }
@@ -316,7 +283,6 @@ export class FacturasService {
         if (!factura) throw new NotFoundException('Factura no encontrada');
         if (factura.estado !== EstadoFactura.BORRADOR) throw new BadRequestException('Esta factura ya fue procesada');
   
-        // Check Concurrencia
         const ultima = await queryRunner.manager.findOne(Factura, {
           where: { empresa: { id: idEmpresa }, serie: factura.serie },
           order: { numero_consecutivo: 'DESC' },
@@ -324,20 +290,15 @@ export class FacturasService {
         });
         const nuevoNumero = ultima ? ultima.numero_consecutivo + 1 : 1;
 
-        // Doble Check
         const duplicada = await queryRunner.manager.findOne(Factura, {
             where: { empresa: { id: idEmpresa }, serie: factura.serie, numero_consecutivo: nuevoNumero }
         });
-        if (duplicada) throw new ConflictException(`Error de concurrencia al confirmar. Intente de nuevo.`);
+        if (duplicada) throw new ConflictException(`Error de concurrencia al confirmar.`);
   
-        // Finalizar Salida de Stock
         for (const det of factura.detalles) {
           if (factura.id_pedido_origen) {
                await this.productosService.finalizarSalida(
-                 det.producto.id_producto,
-                 det.cantidad,
-                 idEmpresa,
-                 queryRunner
+                 det.producto.id_producto, det.cantidad, idEmpresa, queryRunner
                );
           }
         }
@@ -381,38 +342,33 @@ export class FacturasService {
         detalles_error: [] as any[],
     };
 
+    // ✅ CORRECCIÓN IMPORTANTE: Usamos id_usuario para la llave
+    const usuarioSimulado = { id_usuario: idUsuario }; 
+
     for (const idPedido of dto.ids_pedidos) {
         try {
             const respuesta = await this.crear({
                 id_pedido: idPedido,
                 id_empresa: idEmpresa,
-                id_usuario: idUsuario,
+                id_cliente: '', 
+                items: [], 
                 metodo_pago: dto.metodo_pago_defecto || MetodoPago.CREDITO, 
                 estado: EstadoFactura.PENDIENTE 
-            });
+            } as any, usuarioSimulado); 
 
             const facturaData = (respuesta.data as any);
-
             resultados.procesados++;
             resultados.detalles_exito.push({
                 pedido: idPedido,
                 factura: facturaData.numero_completo || facturaData.numero_consecutivo
             });
-
         } catch (error) {
             resultados.fallidos++;
-            resultados.detalles_error.push({
-                pedido: idPedido,
-                motivo: error.message
-            });
+            resultados.detalles_error.push({ pedido: idPedido, motivo: error.message });
         }
     }
 
-    return {
-        success: true,
-        mensaje: `Lote finalizado. Éxito: ${resultados.procesados}/${resultados.total}`,
-        data: resultados
-    };
+    return { success: true, mensaje: `Lote finalizado: ${resultados.procesados}/${resultados.total}`, data: resultados };
   }
 
   // ==========================================================
@@ -421,12 +377,13 @@ export class FacturasService {
   async findAll(idEmpresa: string) {
     return await this.dataSource.getRepository(Factura).find({
         where: { empresa: { id: idEmpresa } },
-        order: { fecha_emision: 'DESC' }, // Mejor ordenar por fecha para reportes
+        order: { fecha_emision: 'DESC' },
         relations: [
           'cliente',
-          'vendedor',           // 👈 Necesario para filtrar por vendedor
-          'detalles',           // 👈 Vital: Las líneas de la factura
-          'detalles.producto'   // 👈 Vital: Para saber Marca y Categoría
+          'cliente.vendedor', // ✅ CORRECCIÓN: Respaldo para facturas viejas
+          'vendedor',         
+          'detalles',
+          'detalles.producto'
         ]
     });
 }

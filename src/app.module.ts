@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common'; // Única importación de Module necesa
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RabbitConfigModule } from './infrastructure/rabbitmq/rabbit.module'; 
 import { ScheduleModule } from '@nestjs/schedule';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 // Importación de tus módulos funcionales
 import { ClientesModule } from './modules/ventas/clientes/clientes.module';
@@ -38,6 +40,12 @@ import { CobranzasModule } from './modules/cobranzas/cobranzas.module';
       autoLoadEntities: true,
       synchronize: true,
       dropSchema: false,
+    }),
+
+    ServeStaticModule.forRoot({
+      rootPath: join(process.cwd(), 'uploads'), // Busca la carpeta uploads en la raíz
+      serveRoot: '/uploads', // La URL será http://localhost:3000/uploads/...
+      exclude: ['/api/(.*)'],
     }),
 
     // 2. Configuración Global de RabbitMQ [cite: 57, 62]
