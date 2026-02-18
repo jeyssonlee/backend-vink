@@ -48,9 +48,11 @@ export class CreateCobranzaDto {
   nota_vendedor?: string;
 
   @IsUUID()
+  @IsOptional()
   id_vendedor: string;
 
   @IsUUID()
+  @IsOptional()
   id_empresa: string;
 
   // Arrays anidados

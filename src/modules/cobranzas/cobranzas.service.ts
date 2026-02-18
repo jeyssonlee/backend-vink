@@ -183,9 +183,23 @@ export class CobranzasService {
     return String(count + 1).padStart(6, '0');
   }
 
-  // Listar pendientes
+  // NUEVO: Listar absolutamente todas las cobranzas de una empresa
+  async findAll(idEmpresa: string) {
+    return this.cobranzaRepo.find({
+      where: { empresa: { id: idEmpresa } },
+      relations: [
+        'vendedor', 
+        'metodos', 
+        'facturas_afectadas', 
+        'facturas_afectadas.factura',
+        'facturas_afectadas.factura.cliente'
+      ],
+      order: { created_at: 'DESC' }
+    });
+  }
+
+  // Listar pendientes (Sincronizado con Controller)
   async findAllPendientes(idEmpresa: string) {
-      // ⚠️ CORRECCIÓN: where: { empresa: { id: ... } }
       return this.cobranzaRepo.find({
           where: { 
             empresa: { id: idEmpresa }, 
