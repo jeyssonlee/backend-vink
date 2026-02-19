@@ -6,7 +6,7 @@ import { DataSource, Repository } from 'typeorm';
 import { Cobranza, EstadoCobranza } from './entities/cobranza.entity';
 import { CobranzaMetodo } from './entities/cobranza-metodo.entity';
 import { CobranzaFactura } from './entities/cobranza-factura.entity';
-import { Factura, EstadoFactura } from '../ventas/facturas/entities/factura.entity'; // Verifica esta ruta
+import { Factura, EstadoFactura } from '../ventas/facturas/entities/factura.entity';
 
 // DTOs
 import { CreateCobranzaDto } from './dto/create-cobranza.dto';
@@ -24,7 +24,7 @@ export class CobranzasService {
   ) {}
 
   // =================================================================
-  // 1. REGISTRAR PAGO
+  // 1. REGISTRAR PAGO (DESDE APP / WEB)
   // =================================================================
   async create(dto: CreateCobranzaDto) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -32,67 +32,63 @@ export class CobranzasService {
     await queryRunner.startTransaction();
 
     try {
-      // A. Validar Montos
-      const sumaMetodos = dto.metodos.reduce((acc, m) => acc + m.monto, 0);
-      const sumaFacturas = dto.facturas.reduce((acc, f) => acc + f.monto_aplicado, 0);
-
-      if (Math.abs(dto.monto_total - sumaMetodos) > 0.01) {
-        throw new BadRequestException('El monto total no coincide con la suma de los métodos de pago');
+      // Validaciones matemáticas
+      const sumaMetodos = dto.metodos.reduce((acc, m) => acc + Number(m.monto || 0), 0);
+      if (Math.abs(Number(dto.monto_total) - sumaMetodos) > 0.01) {
+        throw new BadRequestException('El monto total no coincide con los métodos');
       }
-      if (Math.abs(dto.monto_total - sumaFacturas) > 0.01) {
-        throw new BadRequestException('El monto total no coincide con la suma aplicada a las facturas');
+      
+      const consecutivo = await this.generarConsecutivo(dto.id_empresa);
+
+      // INSERTAR COBRANZA - Usamos SQL puro para evitar el UpdateValuesMissingError
+      // Recuperamos vendedor y url_comprobante para que se vea en el Front
+      const resCobranza = await queryRunner.manager.query(
+        `INSERT INTO cobranzas (
+          consecutivo, fecha_reporte, monto_total, url_comprobante, 
+          nota_vendedor, estado, origen, id_cliente, id_vendedor, id_empresa, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) RETURNING id_cobranza`,
+        [
+          consecutivo,
+          dto.fecha_reporte || new Date(),
+          dto.monto_total,
+          dto.url_comprobante || null, 
+          dto.nota_vendedor || null,
+          EstadoCobranza.POR_CONCILIAR, 
+          'APP',
+          dto.id_cliente,
+          dto.id_vendedor, 
+          dto.id_empresa
+        ]
+      );
+
+      const idNuevaCobranza = resCobranza[0].id_cobranza;
+
+      // Guardar Métodos
+      for (const m of dto.metodos) {
+        await queryRunner.manager.query(
+          `INSERT INTO cobranza_metodos (id_cobranza, metodo, monto, referencia, banco, id_empresa)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [idNuevaCobranza, m.metodo, m.monto, m.referencia || null, m.banco || null, dto.id_empresa]
+        );
       }
 
-      // B. Crear Cabecera
-      // ⚠️ CORRECCIÓN: Usamos 'empresa: { id: ... }' en lugar de 'id_empresa'
-      const nuevaCobranza = this.cobranzaRepo.create({
-        consecutivo: await this.generarConsecutivo(dto.id_empresa),
-        fecha_reporte: dto.fecha_reporte,
-        monto_total: dto.monto_total,
-        url_comprobante: dto.url_comprobante,
-        nota_vendedor: dto.nota_vendedor,
-        estado: EstadoCobranza.POR_CONCILIAR,
-        vendedor: { id: dto.id_vendedor } as any,
-        empresa: { id: dto.id_empresa } as any, // 👈 SOLUCIÓN AL ERROR TS2769
-      });
-
-      const cobradoGuardado = await queryRunner.manager.save(nuevaCobranza);
-
-      // C. Guardar Métodos
-      for (const metodo of dto.metodos) {
-        const nuevoMetodo = queryRunner.manager.create(CobranzaMetodo, {
-            cobranza: cobradoGuardado,
-            ...metodo,
-            empresa: { id: dto.id_empresa } as any // 👈 SOLUCIÓN AL ERROR ID_EMPRESA
-        });
-        await queryRunner.manager.save(nuevoMetodo);
-      }
-
-      // D. Relacionar Facturas
-      for (const item of dto.facturas) {
-        const factura = await queryRunner.manager.findOne(Factura, { where: { id_factura: item.id_factura } });
-        if (!factura) throw new NotFoundException(`Factura ${item.id_factura} no encontrada`);
-
-        const relacion = queryRunner.manager.create(CobranzaFactura, {
-            cobranza: cobradoGuardado, // Ahora sí es un objeto único
-            factura: factura,
-            monto_aplicado: item.monto_aplicado,
-            saldo_anterior: factura.saldo_pendiente,
-            saldo_nuevo: factura.saldo_pendiente
-        });
-        await queryRunner.manager.save(relacion);
+      // Relacionar Facturas - AQUÍ NO SE DESCUENTA SALDO (Flujo original)
+      for (const fDetalle of dto.facturas) {
+        const montoAbono = Number(fDetalle.monto_aplicado);
+        if (montoAbono > 0) {
+          await queryRunner.manager.query(
+            `INSERT INTO cobranza_factura (id_cobranza, id_factura, monto_aplicado) 
+             VALUES ($1, $2, $3)`,
+            [idNuevaCobranza, fDetalle.id_factura, montoAbono]
+          );
+        }
       }
 
       await queryRunner.commitTransaction();
-      
-      // SOLUCIÓN AL ERROR TS2339: cobradoGuardado ahora es seguro un objeto
-      return { success: true, message: 'Cobro registrado. Pendiente de aprobación.', id: cobradoGuardado.id_cobranza };
+      return { success: true, id_cobranza: idNuevaCobranza };
 
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      if (error.code === '23505') {
-         throw new BadRequestException('Esa referencia bancaria ya fue registrada anteriormente.');
-      }
       this.logger.error(error);
       throw error;
     } finally {
@@ -101,7 +97,7 @@ export class CobranzasService {
   }
 
   // =================================================================
-  // 2. APROBAR PAGO
+  // 2. APROBAR PAGO (Saldos se descuentan aquí)
   // =================================================================
   async aprobarCobranza(idCobranza: string, idAdmin: string) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -110,51 +106,54 @@ export class CobranzasService {
 
     try {
       const cobranza = await this.cobranzaRepo.findOne({
-        where: { id_cobranza: idCobranza },
-        relations: ['facturas_afectadas', 'facturas_afectadas.factura']
+        where: { id_cobranza: idCobranza }
       });
 
       if (!cobranza) throw new NotFoundException('Cobranza no encontrada');
-      if (cobranza.estado !== EstadoCobranza.POR_CONCILIAR) {
-        throw new BadRequestException(`Esta cobranza ya está ${cobranza.estado}`);
-      }
+      if (cobranza.estado !== EstadoCobranza.POR_CONCILIAR) throw new BadRequestException('Ya procesada');
 
-      for (const detalle of cobranza.facturas_afectadas) {
+      const detalles = await queryRunner.manager.find(CobranzaFactura, {
+        where: { cobranza: { id_cobranza: idCobranza } },
+        relations: ['factura']
+      });
+
+      for (const detalle of detalles) {
         const factura = detalle.factura;
-        
-        if (Number(factura.saldo_pendiente) < Number(detalle.monto_aplicado)) {
-            throw new BadRequestException(`El abono excede la deuda de la Factura ${factura.numero_control}`);
-        }
+        const monto = Number(detalle.monto_aplicado);
+        const saldoAnterior = Number(factura.saldo_pendiente);
 
-        factura.monto_pagado = Number(factura.monto_pagado) + Number(detalle.monto_aplicado);
-        factura.saldo_pendiente = Number(factura.saldo_pendiente) - Number(detalle.monto_aplicado);
+        const nuevoSaldo = Number((saldoAnterior - monto).toFixed(2));
+        const nuevoPagado = Number((Number(factura.monto_pagado) + monto).toFixed(2));
+        const nuevoEstado = nuevoSaldo <= 0.01 ? EstadoFactura.PAGADA : EstadoFactura.PARCIAL;
 
-        if (factura.saldo_pendiente <= 0.01) {
-            factura.saldo_pendiente = 0;
-            factura.estado = EstadoFactura.PAGADA;
-        } else {
-            factura.estado = EstadoFactura.PARCIAL;
-        }
+        // Actualizamos factura vía SQL para máxima seguridad con decimales
+        await queryRunner.manager.query(
+            `UPDATE facturas SET saldo_pendiente = $1, monto_pagado = $2, estado = $3 WHERE id_factura = $4`,
+            [nuevoSaldo, nuevoPagado, nuevoEstado, factura.id_factura]
+        );
 
-        await queryRunner.manager.update(CobranzaFactura, detalle.id_detalle, {
-            saldo_anterior: Number(factura.saldo_pendiente) + Number(detalle.monto_aplicado),
-            saldo_nuevo: factura.saldo_pendiente
-        });
-
-        await queryRunner.manager.save(factura);
+        // Actualizamos la relación con saldos históricos
+        await queryRunner.manager.update(CobranzaFactura, 
+            { id_detalle: detalle.id_detalle }, 
+            { saldo_anterior: saldoAnterior, saldo_nuevo: nuevoSaldo }
+        );
       }
 
-      cobranza.estado = EstadoCobranza.APLICADA;
-      cobranza.aprobador = { id: idAdmin } as any;
-      cobranza.fecha_aprobacion = new Date();
-
-      await queryRunner.manager.save(cobranza);
+      // Finalizamos el estado de la cobranza
+      await queryRunner.manager.update(Cobranza, 
+        { id_cobranza: idCobranza }, 
+        {
+          estado: EstadoCobranza.APLICADA,
+          fecha_aprobacion: new Date(),
+          aprobador: { id_usuario: idAdmin } as any
+        }
+      );
 
       await queryRunner.commitTransaction();
-      return { success: true, message: 'Cobranza aplicada correctamente.' };
-
+      return { success: true };
     } catch (error) {
       await queryRunner.rollbackTransaction();
+      this.logger.error(error);
       throw error;
     } finally {
       await queryRunner.release();
@@ -167,46 +166,183 @@ export class CobranzasService {
   async rechazarCobranza(idCobranza: string, idAdmin: string, motivo: string) {
     const cobranza = await this.cobranzaRepo.findOne({ where: { id_cobranza: idCobranza } });
     if (!cobranza) throw new NotFoundException('Cobranza no encontrada');
-    if (cobranza.estado !== EstadoCobranza.POR_CONCILIAR) throw new BadRequestException('Solo pendiente');
 
-    cobranza.estado = EstadoCobranza.RECHAZADA;
-    cobranza.nota_admin = motivo;
-    cobranza.aprobador = { id: idAdmin } as any;
-    
-    return this.cobranzaRepo.save(cobranza);
-  }
-
-  // Helper
-  private async generarConsecutivo(idEmpresa: string): Promise<string> {
-    // ⚠️ CORRECCIÓN: where: { empresa: { id: ... } }
-    const count = await this.cobranzaRepo.count({ where: { empresa: { id: idEmpresa } } });
-    return String(count + 1).padStart(6, '0');
-  }
-
-  // NUEVO: Listar absolutamente todas las cobranzas de una empresa
-  async findAll(idEmpresa: string) {
-    return this.cobranzaRepo.find({
-      where: { empresa: { id: idEmpresa } },
-      relations: [
-        'vendedor', 
-        'metodos', 
-        'facturas_afectadas', 
-        'facturas_afectadas.factura',
-        'facturas_afectadas.factura.cliente'
-      ],
-      order: { created_at: 'DESC' }
+    return this.cobranzaRepo.update({ id_cobranza: idCobranza }, {
+      estado: EstadoCobranza.RECHAZADA,
+      nota_admin: motivo,
+      aprobador: { id_usuario: idAdmin } as any
     });
   }
 
-  // Listar pendientes (Sincronizado con Controller)
-  async findAllPendientes(idEmpresa: string) {
-      return this.cobranzaRepo.find({
-          where: { 
-            empresa: { id: idEmpresa }, 
-            estado: EstadoCobranza.POR_CONCILIAR 
-          },
-          relations: ['vendedor', 'metodos', 'facturas_afectadas', 'facturas_afectadas.factura'],
-          order: { fecha_reporte: 'ASC' }
+  // =================================================================
+  // 4. ANULAR PAGO (REVERSAR SALDOS)
+  // =================================================================
+  async anularCobranza(idCobranza: string) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const cobranza = await this.cobranzaRepo.findOne({
+        where: { id_cobranza: idCobranza },
+        relations: ['facturas_afectadas', 'facturas_afectadas.factura']
       });
+
+      if (!cobranza || cobranza.estado !== EstadoCobranza.APLICADA) {
+        throw new BadRequestException('Solo se pueden anular cobranzas aplicadas');
+      }
+
+      for (const detalle of cobranza.facturas_afectadas) {
+        const factura = detalle.factura;
+        const montoReversar = Number(detalle.monto_aplicado);
+
+        const nuevoSaldo = Number((Number(factura.saldo_pendiente) + montoReversar).toFixed(2));
+        const nuevoPagado = Number((Number(factura.monto_pagado) - montoReversar).toFixed(2));
+        
+        await queryRunner.manager.query(
+            `UPDATE facturas SET saldo_pendiente = $1, monto_pagado = $2, estado = $3 WHERE id_factura = $4`,
+            [nuevoSaldo, nuevoPagado, nuevoPagado <= 0 ? EstadoFactura.PENDIENTE : EstadoFactura.PARCIAL, factura.id_factura]
+        );
+      }
+
+      await queryRunner.manager.update(Cobranza, { id_cobranza: idCobranza }, { estado: EstadoCobranza.ANULADA });
+      await queryRunner.commitTransaction();
+      return { success: true };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // =================================================================
+  // 5. REGISTRAR PAGO MANUAL (CAJA)
+  // =================================================================
+  async createManual(data: any) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+        const payload: any = {
+            consecutivo: await this.generarConsecutivo(data.id_empresa),
+            fecha_reporte: data.fecha_reporte,
+            monto_total: data.monto_total,
+            nota_vendedor: data.nota_vendedor,
+            estado: EstadoCobranza.APLICADA,
+            fecha_aprobacion: new Date(),
+            origen: 'CAJA',
+            cliente: { id_cliente: data.id_cliente },
+            empresa: { id: data.id_empresa },
+        };
+
+        const nuevaCobranza = this.cobranzaRepo.create(payload);
+        const cobradoGuardado = (await queryRunner.manager.save(nuevaCobranza)) as unknown as Cobranza;
+
+        if (data.metodos) {
+            for (const metodo of data.metodos) {
+                const nuevoMetodo = queryRunner.manager.create(CobranzaMetodo, {
+                    cobranza: cobradoGuardado,
+                    metodo: metodo.metodo,
+                    monto: metodo.monto,
+                    referencia: metodo.referencia || null,
+                    banco: metodo.banco,
+                    empresa: { id: data.id_empresa }
+                });
+                await queryRunner.manager.save(nuevoMetodo);
+            }
+        }
+
+        if (data.facturas) {
+            let montoDisponible = Number(data.monto_total);
+
+            for (const item of data.facturas) {
+                const factura = await queryRunner.manager.findOne(Factura, { where: { id_factura: item.id_factura } });
+                if (!factura) continue;
+
+                let montoAAplicar = Number(item.monto_aplicado || 0);
+                if (montoAAplicar <= 0) {
+                    const deuda = Number(factura.saldo_pendiente);
+                    montoAAplicar = (montoDisponible >= deuda) ? deuda : montoDisponible;
+                }
+
+                if (montoAAplicar > 0) {
+                    const saldoAnterior = Number(factura.saldo_pendiente);
+                    factura.monto_pagado = Number((Number(factura.monto_pagado) + montoAAplicar).toFixed(2));
+                    factura.saldo_pendiente = Number((saldoAnterior - montoAAplicar).toFixed(2));
+                    
+                    factura.estado = factura.saldo_pendiente <= 0.01 ? EstadoFactura.PAGADA : EstadoFactura.PARCIAL;
+
+                    await queryRunner.manager.save(factura);
+
+                    const detalle = queryRunner.manager.create(CobranzaFactura, {
+                        cobranza: cobradoGuardado,
+                        factura: factura,
+                        monto_aplicado: montoAAplicar,
+                        saldo_anterior: saldoAnterior,
+                        saldo_nuevo: factura.saldo_pendiente
+                    });
+                    await queryRunner.manager.save(detalle);
+                    montoDisponible -= montoAAplicar;
+                }
+            }
+        }
+
+        await queryRunner.commitTransaction();
+        return { success: true, id_cobranza: cobradoGuardado.id_cobranza };
+
+    } catch (error) {
+        await queryRunner.rollbackTransaction();
+        this.logger.error(error);
+        throw new BadRequestException('Error registro manual');
+    } finally {
+        await queryRunner.release();
+    }
+  }
+
+  // =================================================================
+  // 6. CONSULTAS
+  // =================================================================
+  async findAll(idEmpresa: string) {
+    return this.cobranzaRepo.find({
+      where: { empresa: { id: idEmpresa } as any },
+      relations: ['cliente', 'vendedor', 'metodos', 'facturas_afectadas'],
+      order: { created_at: 'DESC' },
+      take: 100
+    });
+  }
+
+  async findAllPendientes(idEmpresa: string) {
+    return this.cobranzaRepo.find({
+      where: { empresa: { id: idEmpresa } as any, estado: EstadoCobranza.POR_CONCILIAR },
+      relations: ['vendedor', 'metodos', 'facturas_afectadas', 'facturas_afectadas.factura', 'cliente'],
+      order: { fecha_reporte: 'ASC' }
+    });
+  }
+
+  async findHistorial(idEmpresa: string) {
+    return this.cobranzaRepo.find({
+      where: { empresa: { id: idEmpresa } as any },
+      relations: ['cliente', 'vendedor', 'metodos', 'facturas_afectadas'],
+      order: { created_at: 'DESC' },
+      take: 100
+    });
+  }
+
+  async findHistorialByVendedor(idVendedor: string) {
+    return this.cobranzaRepo.find({
+      where: { vendedor: { id_usuario: idVendedor } as any },
+      relations: ['cliente', 'metodos'],
+      order: { created_at: 'DESC' },
+      take: 50
+    });
+  }
+
+  private async generarConsecutivo(idEmpresa: string): Promise<string> {
+    const count = await this.cobranzaRepo.count({ 
+      where: { empresa: { id: idEmpresa } as any } 
+    });
+    return String(count + 1).padStart(6, '0');
   }
 }

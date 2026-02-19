@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Patch, Param, Get, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, Patch, Param, Get, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -22,7 +22,6 @@ export class CobranzasController {
     return this.cobranzasService.create(dto);
   }
 
-  // REGISTRO CON ARCHIVO (MULTIPART)
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({
@@ -43,14 +42,24 @@ export class CobranzasController {
     @GetUser() user: any
   ) {
     if (!body.data) throw new BadRequestException('Faltan los datos del pago');
+    
+    // 1. Parseamos los datos
     const datosPago = JSON.parse(body.data);
-
-    // Inyectamos seguridad desde el Token
-    datosPago.id_vendedor = user.id_usuario;
-    datosPago.id_empresa = user.id_empresa;
-    if (file) datosPago.url_comprobante = `/uploads/comprobantes/${file.filename}`;
-
-    return this.cobranzasService.create(datosPago);
+  
+    // 2. Inyectamos los datos del usuario y archivo
+    const payloadCompleto = {
+      ...datosPago,
+      id_vendedor: user.id_usuario,
+      id_empresa: user.id_empresa,
+      fecha_reporte: datosPago.fecha_reporte || new Date().toISOString(),
+      // Forzamos la URL aquí:
+      url_comprobante: file ? `/uploads/comprobantes/${file.filename}` : null
+    };
+  
+    // Este log DEBE mostrar url_comprobante ahora
+    console.log('Datos finales a procesar:', payloadCompleto); 
+  
+    return this.cobranzasService.create(payloadCompleto);
   }
 
   @Get('pendientes')
@@ -73,4 +82,26 @@ export class CobranzasController {
   rechazar(@Param('id') id: string, @GetUser() admin: any, @Body('motivo') motivo: string) {
     return this.cobranzasService.rechazarCobranza(id, admin.id_usuario, motivo);
   }
+
+  @Get('historial')
+  async historial(@Query('id_empresa') idEmpresa: string) {
+    return this.cobranzasService.findHistorial(idEmpresa);
+  }
+
+  @Post('manual')
+  async createManual(@Body() createCobranzaDto: any) {
+    // Asumimos que el DTO es similar al de creación normal
+    return this.cobranzasService.createManual(createCobranzaDto);
+  }
+
+  @Patch(':id/anular')
+  anularCobranza(@Param('id') id: string) {
+    return this.cobranzasService.anularCobranza(id);
+  }
+
+  @Get('vendedor/historial')
+async historialVendedor(@GetUser() user: any) {
+  // Retorna las cobranzas del vendedor logueado para que vea si fueron aprobadas o rechazadas
+  return this.cobranzasService.findHistorialByVendedor(user.id_usuario);
+}
 }
