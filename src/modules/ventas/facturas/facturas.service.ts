@@ -374,17 +374,25 @@ export class FacturasService {
   // ==========================================================
   // 5. LISTAR Y BUSCAR
   // ==========================================================
-  async findAll(idEmpresa: string) {
-    return await this.dataSource.getRepository(Factura).find({
-        where: { empresa: { id: idEmpresa } },
-        order: { fecha_emision: 'DESC' },
-        relations: [
-          'cliente',
-          'cliente.vendedor', // ✅ CORRECCIÓN: Respaldo para facturas viejas
-          'vendedor',         
-          'detalles',
-          'detalles.producto'
-        ]
+  async findAll(idEmpresa: string, idCliente?: string) {
+    // 1. Obtenemos el repositorio usando tu dataSource
+    const facturaRepo = this.dataSource.getRepository(Factura);
+
+    // 2. Armamos el filtro dinámico
+    const whereClause: any = { 
+      empresa: { id: idEmpresa } // Cambia 'id' por 'id_empresa' si tu entidad usa id_empresa
+    };
+
+    // 3. ¡LA MAGIA! Si enviaron un cliente, lo agregamos al filtro
+    if (idCliente) {
+      whereClause.cliente = { id_cliente: idCliente }; 
+    }
+
+    // 4. Ejecutamos la búsqueda
+    return facturaRepo.find({
+      where: whereClause,
+      relations: ['cliente', 'cliente.vendedor', 'vendedor'], // Ajusta estas relaciones según lo que uses en Facturas
+      order: { fecha_emision: 'DESC' } // Si tu fecha se llama distinto (ej: fecha_emision), cámbialo aquí
     });
 }
 

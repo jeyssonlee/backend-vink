@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Patch, UseGuards, Req, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Patch, UseGuards, Req, ParseUUIDPipe, Query } from '@nestjs/common';
 import { FacturasService } from './facturas.service';
 import { CrearFacturaDto } from './dto/crear-factura.dto';
 import { CrearFacturaLoteDto } from './dto/crear-factura-lote.dto';
@@ -54,8 +54,11 @@ export class FacturasController {
 
   // 5. Listar Facturas
   @Get()
-  async findAll(@Req() req: any) {
-    return await this.facturasService.findAll(req.user.id_empresa);
+  findAll(
+    @Query('id_empresa') idEmpresa: string,
+    @Query('id_cliente') idCliente?: string, // 👈 El signo '?' lo hace opcional
+  ) {
+    return this.facturasService.findAll(idEmpresa, idCliente);
   }
 
   // 6. Ver una Factura

@@ -44,7 +44,7 @@ import { CobranzasModule } from './modules/cobranzas/cobranzas.module';
 
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'), // Busca la carpeta uploads en la raíz
-      serveRoot: '/uploads', // La URL será http://localhost:3000/uploads/...
+      serveRoot: '/', // La URL será http://localhost:3000/uploads/...
       exclude: ['/api/(.*)'],
     }),
 

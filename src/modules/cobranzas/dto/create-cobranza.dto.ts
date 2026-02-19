@@ -1,8 +1,8 @@
-import { IsArray, IsDateString, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsArray, IsOptional, IsDateString, IsUUID, Min, ValidateNested, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
-import { MetodoPagoDetalle } from '../entities/cobranza-metodo.entity';
+// 👇 Importar desde enums, NO desde la entidad
+import { MetodoPagoDetalle } from './cobranza.enums';
 
-// 1. Detalle del Dinero
 export class CreateCobranzaMetodoDto {
   @IsEnum(MetodoPagoDetalle)
   metodo: MetodoPagoDetalle;
@@ -20,20 +20,18 @@ export class CreateCobranzaMetodoDto {
   banco?: string;
 }
 
-// 2. Detalle de Imputación
 export class CreateCobranzaFacturaDto {
   @IsUUID()
   id_factura: string;
 
   @IsNumber()
-  @Min(0.01)
+  @Min(0.00)
   monto_aplicado: number;
 }
 
-// 3. Cabecera (El Recibo)
 export class CreateCobranzaDto {
   @IsDateString()
-  fecha_reporte: string;
+  fecha_reporte: Date;
 
   @IsString()
   @IsOptional()
@@ -55,7 +53,10 @@ export class CreateCobranzaDto {
   @IsOptional()
   id_empresa: string;
 
-  // Arrays anidados
+  @IsNotEmpty()
+  @IsString()
+  id_cliente: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateCobranzaMetodoDto)
