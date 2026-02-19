@@ -145,7 +145,7 @@ export class CobranzasService {
         {
           estado: EstadoCobranza.APLICADA,
           fecha_aprobacion: new Date(),
-          aprobador: { id_usuario: idAdmin } as any
+          aprobador: { id: idAdmin } as any
         }
       );
 
@@ -170,7 +170,7 @@ export class CobranzasService {
     return this.cobranzaRepo.update({ id_cobranza: idCobranza }, {
       estado: EstadoCobranza.RECHAZADA,
       nota_admin: motivo,
-      aprobador: { id_usuario: idAdmin } as any
+      aprobador: { id: idAdmin } as any
     });
   }
 
@@ -332,7 +332,7 @@ export class CobranzasService {
 
   async findHistorialByVendedor(idVendedor: string) {
     return this.cobranzaRepo.find({
-      where: { vendedor: { id_usuario: idVendedor } as any },
+      where: { vendedor: { id: idVendedor } as any },
       relations: ['cliente', 'metodos'],
       order: { created_at: 'DESC' },
       take: 50
