@@ -1,8 +1,9 @@
-import { Controller, Post, Body, Patch, Param, Get, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query } from '@nestjs/common';
+import { Controller, Post, Body, Patch, Param, Get, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query, Logger } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { extname, join } from 'path';
 import * as fs from 'fs'; // Necesario para asegurar carpetas en Windows
+import { randomUUID } from 'crypto';
 
 import { CobranzasService } from './cobranzas.service';
 import { CreateCobranzaDto } from './dto/create-cobranza.dto';
@@ -12,6 +13,8 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 @Controller('cobranzas')
 @UseGuards(JwtAuthGuard)
 export class CobranzasController {
+  private readonly logger = new Logger(CobranzasController.name);
+
   constructor(private readonly cobranzasService: CobranzasService) {}
 
   // REGISTRO ESTÁNDAR (JSON)
@@ -26,15 +29,24 @@ export class CobranzasController {
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({
       destination: (req, file, cb) => {
-        const uploadPath = './uploads/comprobantes';
+        const uploadPath = join(process.cwd(), 'uploads', 'comprobantes');
         if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
         cb(null, uploadPath);
       },
       filename: (req, file, cb) => {
-        const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
-        cb(null, `${randomName}${extname(file.originalname)}`);
+        const uniqueName = randomUUID();
+        cb(null, `${uniqueName}${extname(file.originalname)}`);
       },
     }),
+    fileFilter: (req, file, cb) => {
+      if (!file.mimetype.match(/\/(jpg|jpeg|png|webp)$/)) {
+        return cb(new BadRequestException('Solo se permiten archivos de imagen (jpg, jpeg, png, webp)'), false);
+      }
+      cb(null, true);
+    },
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5MB
+    },
   }))
   async createWithUpload(
     @UploadedFile() file: Express.Multer.File, 
@@ -45,6 +57,10 @@ export class CobranzasController {
     
     // 1. Parseamos los datos
     const datosPago = JSON.parse(body.data);
+
+    if (!file) {
+      this.logger.warn(`Solicitud de carga recibida sin archivo o archivo invalido. Usuario: ${user.id_usuario}`);
+    }
   
     // 2. Inyectamos los datos del usuario y archivo
     const payloadCompleto = {
@@ -53,7 +69,7 @@ export class CobranzasController {
       id_empresa: user.id_empresa,
       fecha_reporte: datosPago.fecha_reporte || new Date().toISOString(),
       // Forzamos la URL aquí:
-      url_comprobante: file ? `/uploads/comprobantes/${file.filename}` : null
+      url_comprobante: file ? `/comprobantes/${file.filename}` : null
     };
   
     // Este log DEBE mostrar url_comprobante ahora
