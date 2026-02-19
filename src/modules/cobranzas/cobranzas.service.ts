@@ -77,7 +77,7 @@ export class CobranzasService {
         const montoAbono = Number(fDetalle.monto_aplicado);
         if (montoAbono > 0) {
           await queryRunner.manager.query(
-            `INSERT INTO cobranza_factura (id_cobranza, id_factura, monto_aplicado) 
+            `INSERT INTO cobranza_facturas (id_cobranza, id_factura, monto_aplicado)
              VALUES ($1, $2, $3)`,
             [idNuevaCobranza, fDetalle.id_factura, montoAbono]
           );
