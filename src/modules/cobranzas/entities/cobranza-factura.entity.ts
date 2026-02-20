@@ -19,10 +19,10 @@ export class CobranzaFactura {
   monto_aplicado: number; // Cuánto se abonó a esta factura específica
 
   // 👇 AUDITORÍA: Foto de la deuda antes y después del pago
-  @Column('decimal', { precision: 12, scale: 2 })
+  @Column('decimal', { precision: 12, scale: 2, nullable: true })
   saldo_anterior: number;
 
-  @Column('decimal', { precision: 12, scale: 2 })
+  @Column('decimal', { precision: 12, scale: 2, nullable: true })
   saldo_nuevo: number;
 
   @CreateDateColumn()
