@@ -76,7 +76,7 @@ describe('CobranzasController', () => {
         id_empresa: 'company1',
       };
 
-      await controller.createWithUpload(undefined, body, user);
+      await controller.createWithUpload(undefined as any, body, user);
 
       expect(service.create).toHaveBeenCalledWith(expect.objectContaining({
         monto: 100,
@@ -86,7 +86,7 @@ describe('CobranzasController', () => {
 
     it('should throw BadRequestException if data is missing', async () => {
        const user = { id_usuario: '1' };
-       await expect(controller.createWithUpload(undefined, {}, user)).rejects.toThrow(BadRequestException);
+       await expect(controller.createWithUpload(undefined as any, {}, user)).rejects.toThrow(BadRequestException);
     });
   });
 });

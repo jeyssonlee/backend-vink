@@ -32,7 +32,6 @@ export class CobranzasService {
     await queryRunner.startTransaction();
 
     try {
-      // Validaciones matemáticas
       const sumaMetodos = dto.metodos.reduce((acc, m) => acc + Number(m.monto || 0), 0);
       if (Math.abs(Number(dto.monto_total) - sumaMetodos) > 0.01) {
         throw new BadRequestException('El monto total no coincide con los métodos');
@@ -40,8 +39,7 @@ export class CobranzasService {
       
       const consecutivo = await this.generarConsecutivo(dto.id_empresa);
 
-      // INSERTAR COBRANZA - Usamos SQL puro para evitar el UpdateValuesMissingError
-      // Recuperamos vendedor y url_comprobante para que se vea en el Front
+      // INSERTAR COBRANZA - SQL Puro para evitar el UpdateValuesMissingError
       const resCobranza = await queryRunner.manager.query(
         `INSERT INTO cobranzas (
           consecutivo, fecha_reporte, monto_total, url_comprobante, 
@@ -63,7 +61,6 @@ export class CobranzasService {
 
       const idNuevaCobranza = resCobranza[0].id_cobranza;
 
-      // Guardar Métodos
       for (const m of dto.metodos) {
         await queryRunner.manager.query(
           `INSERT INTO cobranza_metodos (id_cobranza, metodo, monto, referencia, banco, id_empresa)
@@ -72,12 +69,11 @@ export class CobranzasService {
         );
       }
 
-      // Relacionar Facturas - AQUÍ NO SE DESCUENTA SALDO (Flujo original)
       for (const fDetalle of dto.facturas) {
         const montoAbono = Number(fDetalle.monto_aplicado);
         if (montoAbono > 0) {
           await queryRunner.manager.query(
-            `INSERT INTO cobranza_facturas (id_cobranza, id_factura, monto_aplicado)
+            `INSERT INTO cobranza_facturas (id_cobranza, id_factura, monto_aplicado) 
              VALUES ($1, $2, $3)`,
             [idNuevaCobranza, fDetalle.id_factura, montoAbono]
           );
@@ -97,81 +93,88 @@ export class CobranzasService {
   }
 
   // =================================================================
-  // 2. APROBAR PAGO (Saldos se descuentan aquí)
+  // 2. APROBAR PAGO (Cambios estructurales aplicados aquí)
   // =================================================================
-  async aprobarCobranza(idCobranza: string, idAdmin: string) {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+  // src/modules/cobranzas/cobranzas.service.ts
 
-    try {
-      const cobranza = await this.cobranzaRepo.findOne({
-        where: { id_cobranza: idCobranza }
-      });
+async aprobarCobranza(id: string, idAprobador: string) {
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
 
-      if (!cobranza) throw new NotFoundException('Cobranza no encontrada');
-      if (cobranza.estado !== EstadoCobranza.POR_CONCILIAR) throw new BadRequestException('Ya procesada');
+  try {
+    // 1. Buscamos la cobranza CON sus facturas relacionadas
+    const cobranza = await queryRunner.manager.findOne(Cobranza, {
+      where: { id_cobranza: id },
+      relations: ['facturas_afectadas', 'facturas_afectadas.factura'] // 👈 Vital para traer los saldos
+    });
 
-      const detalles = await queryRunner.manager.find(CobranzaFactura, {
-        where: { cobranza: { id_cobranza: idCobranza } },
-        relations: ['factura']
-      });
+    if (!cobranza) {
+      throw new NotFoundException('Cobranza no encontrada');
+    }
+    if (cobranza.estado === EstadoCobranza.APLICADA) {
+      throw new BadRequestException('Esta cobranza ya fue aplicada anteriormente');
+    }
 
-      for (const detalle of detalles) {
+    // 2. Actualizamos la cobranza
+    cobranza.estado = EstadoCobranza.APLICADA;
+    cobranza.fecha_aprobacion = new Date();
+    cobranza.aprobador = { id_usuario: idAprobador } as any;
+    
+    await queryRunner.manager.save(cobranza);
+
+    // 3. Recorremos las facturas para descontar el saldo
+    if (cobranza.facturas_afectadas && cobranza.facturas_afectadas.length > 0) {
+      for (const detalle of cobranza.facturas_afectadas) {
         const factura = detalle.factura;
+        
         const monto = Number(detalle.monto_aplicado);
         const saldoAnterior = Number(factura.saldo_pendiente);
-
-        const nuevoSaldo = Number((saldoAnterior - monto).toFixed(2));
+        const nuevoSaldo = Math.max(0, Number((saldoAnterior - monto).toFixed(2)));
         const nuevoPagado = Number((Number(factura.monto_pagado) + monto).toFixed(2));
-        const nuevoEstado = nuevoSaldo <= 0.01 ? EstadoFactura.PAGADA : EstadoFactura.PARCIAL;
 
-        // Actualizamos factura vía SQL para máxima seguridad con decimales
-        await queryRunner.manager.query(
-            `UPDATE facturas SET saldo_pendiente = $1, monto_pagado = $2, estado = $3 WHERE id_factura = $4`,
-            [nuevoSaldo, nuevoPagado, nuevoEstado, factura.id_factura]
-        );
+        factura.saldo_pendiente = nuevoSaldo;
+        factura.monto_pagado = nuevoPagado;
+        factura.estado = nuevoSaldo <= 0.01 ? EstadoFactura.PAGADA : EstadoFactura.PARCIAL;
 
-        // Actualizamos la relación con saldos históricos
-        await queryRunner.manager.update(CobranzaFactura, 
-            { id_detalle: detalle.id_detalle }, 
-            { saldo_anterior: saldoAnterior, saldo_nuevo: nuevoSaldo }
-        );
+        // Guardamos la factura actualizada
+        await queryRunner.manager.save(factura);
       }
-
-      // Finalizamos el estado de la cobranza
-      await queryRunner.manager.update(Cobranza, 
-        { id_cobranza: idCobranza }, 
-        {
-          estado: EstadoCobranza.APLICADA,
-          fecha_aprobacion: new Date(),
-          aprobador: { id: idAdmin } as any
-        }
-      );
-
-      await queryRunner.commitTransaction();
-      return { success: true };
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      this.logger.error(error);
-      throw error;
-    } finally {
-      await queryRunner.release();
     }
-  }
 
+    // 4. Confirmamos la transacción (Se guardan todos los cambios juntos)
+    await queryRunner.commitTransaction();
+    return { message: 'Cobranza aprobada y saldos descontados correctamente' };
+
+  } catch (error) {
+    // Si algo falla, deshacemos todo para no alterar saldos por error
+    await queryRunner.rollbackTransaction();
+    throw error;
+  } finally {
+    // Liberamos el motor de base de datos
+    await queryRunner.release();
+  }
+}
   // =================================================================
   // 3. RECHAZAR PAGO
   // =================================================================
-  async rechazarCobranza(idCobranza: string, idAdmin: string, motivo: string) {
-    const cobranza = await this.cobranzaRepo.findOne({ where: { id_cobranza: idCobranza } });
-    if (!cobranza) throw new NotFoundException('Cobranza no encontrada');
-
-    return this.cobranzaRepo.update({ id_cobranza: idCobranza }, {
-      estado: EstadoCobranza.RECHAZADA,
-      nota_admin: motivo,
-      aprobador: { id: idAdmin } as any
+  async rechazarCobranza(id: string, idAprobador: string, motivo: string) {
+    const cobranza = await this.cobranzaRepo.findOne({ 
+      where: { id_cobranza: id } 
     });
+  
+    if (!cobranza) {
+      throw new NotFoundException('Cobranza no encontrada');
+    }
+  
+    cobranza.estado = EstadoCobranza.RECHAZADA;
+    cobranza.fecha_aprobacion = new Date();
+    cobranza.nota_admin = motivo;
+    
+    cobranza.aprobador = { id_usuario: idAprobador } as any;
+  
+    // 4. Guardamos los cambios
+    return await this.cobranzaRepo.save(cobranza);
   }
 
   // =================================================================
@@ -306,7 +309,10 @@ export class CobranzasService {
   // =================================================================
   async findAll(idEmpresa: string) {
     return this.cobranzaRepo.find({
-      where: { empresa: { id: idEmpresa } as any },
+      where: { 
+        empresa: { id: idEmpresa } as any,
+        estado: EstadoCobranza.APLICADA // 👈 O déjala sin estado si quieres ver TODO (incluyendo fallidas)
+      },
       relations: ['cliente', 'vendedor', 'metodos', 'facturas_afectadas'],
       order: { created_at: 'DESC' },
       take: 100
@@ -323,16 +329,21 @@ export class CobranzasService {
 
   async findHistorial(idEmpresa: string) {
     return this.cobranzaRepo.find({
-      where: { empresa: { id: idEmpresa } as any },
+      where: { 
+        empresa: { id: idEmpresa } as any,
+        // 🚀 FILTRO CLAVE: Solo lo aprobado
+        estado: EstadoCobranza.APLICADA 
+      },
       relations: ['cliente', 'vendedor', 'metodos', 'facturas_afectadas'],
-      order: { created_at: 'DESC' },
+      // 💡 Tip: Ordena por fecha_aprobacion para que el historial sea cronológico de cierre
+      order: { fecha_aprobacion: 'DESC' }, 
       take: 100
     });
   }
 
   async findHistorialByVendedor(idVendedor: string) {
     return this.cobranzaRepo.find({
-      where: { vendedor: { id: idVendedor } as any },
+      where: { vendedor: { id_usuario: idVendedor } as any, estado: EstadoCobranza.APLICADA },
       relations: ['cliente', 'metodos'],
       order: { created_at: 'DESC' },
       take: 50

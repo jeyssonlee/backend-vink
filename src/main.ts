@@ -6,6 +6,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors();
+
+  app.setGlobalPrefix('api');
   
   // Activa la validación automática para todos los DTOs
   app.useGlobalPipes(new ValidationPipe({
