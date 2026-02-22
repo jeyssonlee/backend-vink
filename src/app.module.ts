@@ -4,6 +4,7 @@ import { RabbitConfigModule } from './infrastructure/rabbitmq/rabbit.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 // Importación de tus módulos funcionales
 import { ClientesModule } from './modules/ventas/clientes/clientes.module';
@@ -24,34 +25,45 @@ import { AlmacenesModule } from './modules/inventario/almacenes/almacenes.module
 import { KardexModule } from './modules/inventario/kardex/kardex.module';
 import { FacturasModule } from './modules/ventas/facturas/facturas.module';
 import { CobranzasModule } from './modules/cobranzas/cobranzas.module';
+import { MonitorDolarModule } from './modules/utilidades/monitor-dolar/monitor-dolar.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 
 @Module({
   imports: [
-    // 1. Configuración de Base de Datos (PostgreSQL Central) [cite: 19, 28]
-   ScheduleModule.forRoot(),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: 'localhost',
-      port: 5432,
-      username: 'soporte',
-      password: 'soporte',
-      database: 'erp_hub',
-      autoLoadEntities: true,
-      synchronize: true,
-      dropSchema: false,
+    ConfigModule.forRoot({
+      envFilePath: '.env', // El nombre exacto de tu archivo
+      isGlobal: true, // Para que esté disponible en todos los módulos (Cobranzas, Ventas, etc.)
     }),
+    //  Configuración de Base de Datos (PostgreSQL Central) [cite: 19, 28]
+   ScheduleModule.forRoot(),
+   TypeOrmModule.forRootAsync({
+    imports: [ConfigModule],
+    inject: [ConfigService],
+    useFactory: (configService: ConfigService) => ({
+      type: 'postgres',
+      host: configService.get<string>('DB_HOST'),
+      port: configService.get<number>('DB_PORT'),
+      username: configService.get<string>('DB_USER'),
+      password: configService.get<string>('DB_PASSWORD'),
+      database: configService.get<string>('DB_NAME'),
+      autoLoadEntities: true,
+      synchronize: configService.get<string>('DB_SYNC') === 'true',
+    }),
+  }),
+  
 
+    //Configuracion para guardar los comprobante de cobranzas
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'), // Busca la carpeta uploads en la raíz
       serveRoot: '/uploads', // La URL será http://localhost:3000/uploads/...
       exclude: ['/api/(.*)'],
     }),
 
-    // 2. Configuración Global de RabbitMQ [cite: 57, 62]
+    //  Configuración Global de RabbitMQ [cite: 57, 62]
     RabbitConfigModule,
 
-    // 3. Tus Módulos del ERP [cite: 68]
+    //  Tus Módulos del ERP [cite: 68]
     ClientesModule,
     VendedoresModule,
     EmpresasModule,
@@ -69,7 +81,9 @@ import { CobranzasModule } from './modules/cobranzas/cobranzas.module';
     AlmacenesModule,
     KardexModule,
     FacturasModule,
-    CobranzasModule 
+    CobranzasModule,
+    MonitorDolarModule,
+    DashboardModule 
      ],
 })
 export class AppModule {}

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Patch, Param, Get, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Patch, Param, Get, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Query, Logger, ParseFilePipe, MaxFileSizeValidator } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -30,24 +30,49 @@ export class CobranzasController {
     storage: diskStorage({
       destination: (req, file, cb) => {
         const uploadPath = join(process.cwd(), 'uploads', 'comprobantes');
+        // Mantenemos tu lógica de creación de carpeta
         if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
         cb(null, uploadPath);
       },
       filename: (req, file, cb) => {
         const uniqueName = randomUUID();
+        // Mantenemos tu UUID pero aseguramos la extensión
         cb(null, `${uniqueName}${extname(file.originalname)}`);
       },
     }),
+    // 🛡️ AQUÍ ESTÁ LA MEJORA DE SEGURIDAD (Hallazgo #11)
     fileFilter: (req, file, cb) => {
-      if (!file.mimetype.match(/\/(jpg|jpeg|png|webp)$/)) {
-        return cb(new BadRequestException('Solo se permiten archivos de imagen (jpg, jpeg, png, webp)'), false);
+      // Validamos tanto el Mimetype como la extensión real para que no nos engañen
+      const allowedExtensions = /\.(jpg|jpeg|png|webp|pdf)$/;
+      const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+
+      if (allowedMimeTypes.includes(file.mimetype) && file.originalname.toLowerCase().match(allowedExtensions)) {
+        cb(null, true);
+      } else {
+        cb(new BadRequestException('Solo se permiten imágenes (jpg, png, webp) o archivos PDF'), false);
       }
-      cb(null, true);
-    },
-    limits: {
-      fileSize: 5 * 1024 * 1024, // 5MB
     },
   }))
+  // 🛡️ SEGUNDO ESCUDO: Validación de tamaño y obligatoriedad
+  uploadComprobante(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+        ],
+        fileIsRequired: true,
+      }),
+    ) file: Express.Multer.File,
+  ) {
+    return {
+      exito: true,
+      mensaje: 'Archivo validado y subido',
+      path: file.path,
+      filename: file.filename
+    };
+  }
+
+
   async createWithUpload(
     @UploadedFile() file: Express.Multer.File, 
     @Body() body: any, 

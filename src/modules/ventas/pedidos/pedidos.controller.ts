@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Patch, Param, UseGuards, Req, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Patch, Param, UseGuards, Req, UnauthorizedException, Query } from '@nestjs/common';
 import { PedidosService } from './pedidos.service';
 import { CreatePedidoDto } from './dto/create-pedido.dto';
 import { AuthGuard } from '@nestjs/passport'; 
@@ -10,21 +10,26 @@ export class PedidosController {
 
   @Post()
   async crear(@Body() createPedidoDto: CreatePedidoDto, @Req() req) {
-    const idEmpresa = req.user.id_empresa;
+    const usuarioLogueado = req.user;
+    createPedidoDto.id_empresa = usuarioLogueado.id_empresa;
+    createPedidoDto.id_vendedor = usuarioLogueado.id;
     
-    // Inyectamos empresa si falta
-    if (!createPedidoDto.id_empresa) {
-        createPedidoDto.id_empresa = idEmpresa;
-    }
-    
-    // CORRECCIÓN: Usamos el método 'Local' que sabe leer este DTO
+     // CORRECCIÓN: Usamos el método 'Local' que sabe leer este DTO
     return await this.pedidosService.crearPedidoLocal(createPedidoDto);
   }
 
   @Get()
-  async listar(@Req() req) {
-    // CORRECCIÓN: Ahora este método existe en el servicio
-    return await this.pedidosService.obtenerTodos();
+  async listar(@Req() req, @Query('estado') estado?: string) { // 🚀 Agregamos @Query
+    const idEmpresa = req.user.id_empresa;
+    
+    // Le pasamos el estado (si existe) y el id_empresa al servicio
+    return await this.pedidosService.obtenerTodos(idEmpresa, estado);
+  }
+
+  @Get(':id')
+  async obtenerPorId(@Param('id') id: string, @Req() req) {
+    const idEmpresa = req.user.id_empresa;
+    return await this.pedidosService.obtenerUnPedido(id, idEmpresa);
   }
 
   @Patch(':id_local/anular')

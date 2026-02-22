@@ -375,6 +375,56 @@ export class ProductosService {
     }, qr); // 👈 Pasamos QR
   }
 
+  /**
+   * Venta Directa: Resta stock del almacén de venta (sin pasar por apartados).
+   * Usado cuando la factura NO viene de un pedido.
+   */
+  async registrarSalidaDirecta(
+    idProducto: string,
+    cantidadInput: number,
+    idEmpresa: string,
+    observacion: string,
+    qr: QueryRunner
+  ) {
+    const cantidad = Number(cantidadInput);
+
+    const almRes = await qr.manager.query(
+      `SELECT id_almacen FROM almacenes WHERE es_venta = true AND id_empresa = $1 LIMIT 1`,
+      [idEmpresa]
+    );
+    if (almRes.length === 0) throw new BadRequestException('No existe almacén de venta configurado');
+    const idAlmacenVenta = almRes[0].id_almacen;
+
+    const stockAntRes = await qr.manager.query(
+      `SELECT cantidad, costo_unitario FROM inventarios WHERE id_producto = $1 AND id_almacen = $2`,
+      [idProducto, idAlmacenVenta]
+    );
+    const stockAnt = stockAntRes.length > 0 ? parseFloat(stockAntRes[0].cantidad) : 0;
+    const costo = stockAntRes.length > 0 ? parseFloat(stockAntRes[0].costo_unitario) : 0;
+
+    if (stockAnt < cantidad) {
+      throw new BadRequestException(`Stock insuficiente. Disponible: ${stockAnt}, requerido: ${cantidad}`);
+    }
+
+    await qr.manager.query(`
+      UPDATE inventarios SET cantidad = cantidad - $1, updated_at = NOW()
+      WHERE id_producto = $2 AND id_empresa = $3 AND id_almacen = $4
+    `, [cantidad, idProducto, idEmpresa, idAlmacenVenta]);
+
+    await this.kardexService.registrar({
+      id_empresa: idEmpresa,
+      id_almacen: idAlmacenVenta,
+      id_producto: idProducto,
+      tipo: TipoMovimiento.VENTA,
+      cantidad: cantidad,
+      costo_unitario: costo,
+      stock_inicial: stockAnt,
+      stock_final: stockAnt - cantidad,
+      referencia: 'VENTA-DIRECTA',
+      observacion: observacion
+    }, qr);
+  }
+
   async finalizarSalida(idProducto: string, cantidadInput: number, idEmpresa: string, qr: QueryRunner) {
     const cantidad = Number(cantidadInput);
 

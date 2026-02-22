@@ -267,68 +267,77 @@ export class FacturasService {
   }
 
   // ==========================================================
-  // 3. CONFIRMAR BORRADOR
+  // 3. CONFIRMAR BORRADOR (CORREGIDO - Hallazgo #12)
   // ==========================================================
   async confirmarBorrador(idFactura: string, idEmpresa: string) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-  
-      try {
-        const factura = await queryRunner.manager.findOne(Factura, {
-          where: { id_factura: idFactura, empresa: { id: idEmpresa } },
-          relations: ['detalles', 'detalles.producto']
-        });
-  
-        if (!factura) throw new NotFoundException('Factura no encontrada');
-        if (factura.estado !== EstadoFactura.BORRADOR) throw new BadRequestException('Esta factura ya fue procesada');
-  
-        const ultima = await queryRunner.manager.findOne(Factura, {
-          where: { empresa: { id: idEmpresa }, serie: factura.serie },
-          order: { numero_consecutivo: 'DESC' },
-          lock: { mode: 'pessimistic_write' }
-        });
-        const nuevoNumero = ultima ? ultima.numero_consecutivo + 1 : 1;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-        const duplicada = await queryRunner.manager.findOne(Factura, {
-            where: { empresa: { id: idEmpresa }, serie: factura.serie, numero_consecutivo: nuevoNumero }
-        });
-        if (duplicada) throw new ConflictException(`Error de concurrencia al confirmar.`);
-  
-        for (const det of factura.detalles) {
-          if (factura.id_pedido_origen) {
-               await this.productosService.finalizarSalida(
-                 det.producto.id_producto, det.cantidad, idEmpresa, queryRunner
-               );
-          }
-        }
-  
-        factura.numero_consecutivo = nuevoNumero;
-        factura.estado = factura.metodo_pago === MetodoPago.CREDITO ? EstadoFactura.PENDIENTE : EstadoFactura.PAGADA;
-        factura.fecha_emision = new Date();
-  
-        if (factura.dias_credito > 0) {
-          const v = new Date();
-          v.setDate(v.getDate() + factura.dias_credito);
-          factura.fecha_vencimiento = v;
-        }
-  
-        await queryRunner.manager.save(factura);
-        
+    try {
+      const factura = await queryRunner.manager.findOne(Factura, {
+        where: { id_factura: idFactura, empresa: { id: idEmpresa } },
+        relations: ['detalles', 'detalles.producto']
+      });
+
+      if (!factura) throw new NotFoundException('Factura no encontrada');
+      if (factura.estado !== EstadoFactura.BORRADOR) throw new BadRequestException('Esta factura ya fue procesada');
+
+      // 1. Consecutivo con bloqueo para evitar saltos o duplicados
+      const ultima = await queryRunner.manager.findOne(Factura, {
+        where: { empresa: { id: idEmpresa }, serie: factura.serie },
+        order: { numero_consecutivo: 'DESC' },
+        lock: { mode: 'pessimistic_write' }
+      });
+      const nuevoNumero = ultima ? ultima.numero_consecutivo + 1 : 1;
+
+      // 2. MANEJO DE INVENTARIO (Blindado)
+      for (const det of factura.detalles) {
         if (factura.id_pedido_origen) {
-          await queryRunner.manager.update(Pedido, factura.id_pedido_origen, { estado: 'FACTURADO' as any });
+          // Caso A: Viene de pedido (Stock ya estaba comprometido)
+          await this.productosService.finalizarSalida(
+            det.producto.id_producto, det.cantidad, idEmpresa, queryRunner
+          );
+        } else {
+          // Caso B: Venta Directa (Hallazgo #12)
+          // Registramos una salida directa en el Kardex y restamos stock actual
+          await this.productosService.registrarSalidaDirecta(
+            det.producto.id_producto, 
+            det.cantidad, 
+            idEmpresa, 
+            `Venta Directa: ${factura.serie}-${nuevoNumero}`,
+            queryRunner
+          );
         }
-  
-        await queryRunner.commitTransaction();
-        return { success: true, numero: factura.numero_completo };
-  
-      } catch (error) {
-          await queryRunner.rollbackTransaction();
-          throw error;
-      } finally {
-          await queryRunner.release();
       }
+
+      // 3. Actualización de datos de la factura
+      factura.numero_consecutivo = nuevoNumero;
+      factura.estado = factura.metodo_pago === MetodoPago.CREDITO ? EstadoFactura.PENDIENTE : EstadoFactura.PAGADA;
+      factura.fecha_emision = new Date();
+
+      if (factura.dias_credito > 0) {
+        const v = new Date();
+        v.setDate(v.getDate() + factura.dias_credito);
+        factura.fecha_vencimiento = v;
+      }
+
+      await queryRunner.manager.save(factura);
+      
+      if (factura.id_pedido_origen) {
+        await queryRunner.manager.update(Pedido, factura.id_pedido_origen, { estado: 'FACTURADO' as any });
+      }
+
+      await queryRunner.commitTransaction();
+      return { success: true, numero: `${factura.serie}-${factura.numero_consecutivo}` };
+
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
+  }
 
   // ==========================================================
   // 4. CREAR LOTE MASIVO

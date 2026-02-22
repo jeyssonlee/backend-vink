@@ -50,10 +50,20 @@ export class PedidosService {
     return await this.crearPedido(syncDto);
   }
 
-  async obtenerTodos() {
+ async obtenerTodos(idEmpresa: string, estado?: string) {
+    // 1. Preparamos las condiciones base (¡Siempre la empresa!)
+    const condiciones: any = { id_empresa: idEmpresa };
+
+    // 2. Si el frontend nos mandó un estado, lo agregamos al filtro
+    if (estado) {
+      condiciones.estado = estado; // Ajusta 'estado' al nombre real de tu columna en la BD (ej. estado_pedido)
+    }
+
+    // 3. Ejecutamos la búsqueda con TypeORM
     return await this.pedidoRepo.find({
-      relations: ['detalles', 'detalles.producto', 'cliente', 'vendedor'],
-      order: { fecha: 'DESC' },
+      where: condiciones,
+      order: { fecha: 'DESC' }, // Opcional: ordenarlos del más nuevo al más viejo
+      // relations: ['detalles'] // Descomenta si necesitas traer los items del pedido
     });
   }
 
@@ -287,5 +297,18 @@ export class PedidosService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  async obtenerUnPedido(id: string, idEmpresa: string) {
+    const pedido = await this.pedidoRepo.findOne({
+      where: { id_pedido_local: id, id_empresa: idEmpresa }, // Siempre validamos la empresa por seguridad
+      relations: ['detalles'], // 👈 ¡Aquí está la magia para traer los productos!
+    });
+
+    if (!pedido) {
+      throw new NotFoundException(`Pedido con ID ${id} no encontrado`);
+    }
+
+    return pedido;
   }
 }

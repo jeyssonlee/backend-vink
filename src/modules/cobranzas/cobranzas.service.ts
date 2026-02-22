@@ -24,7 +24,7 @@ export class CobranzasService {
   ) {}
 
   // =================================================================
-  // 1. REGISTRAR PAGO (DESDE APP / WEB)
+  // 1. REGISTRAR PAGO (DESDE APP / WEB) - CORREGIDO #9
   // =================================================================
   async create(dto: CreateCobranzaDto) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -37,9 +37,16 @@ export class CobranzasService {
         throw new BadRequestException('El monto total no coincide con los métodos');
       }
       
-      const consecutivo = await this.generarConsecutivo(dto.id_empresa);
+      // 🚀 SOLUCIÓN #9: Generar consecutivo DENTRO de la transacción con bloqueo
+      // Buscamos la última cobranza de la empresa y bloqueamos la fila
+      const ultima = await queryRunner.manager.findOne(Cobranza, {
+        where: { empresa: { id: dto.id_empresa } },
+        order: { consecutivo: 'DESC' },
+        lock: { mode: 'pessimistic_write' }
+      });
+      const consecutivo = ultima ? (Number(ultima.consecutivo) + 1).toString() : '1';
 
-      // INSERTAR COBRANZA - SQL Puro para evitar el UpdateValuesMissingError
+      // INSERTAR COBRANZA - SQL Puro
       const resCobranza = await queryRunner.manager.query(
         `INSERT INTO cobranzas (
           consecutivo, fecha_reporte, monto_total, url_comprobante, 
@@ -81,11 +88,11 @@ export class CobranzasService {
       }
 
       await queryRunner.commitTransaction();
-      return { success: true, id_cobranza: idNuevaCobranza };
+      return { success: true, id_cobranza: idNuevaCobranza, consecutivo };
 
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      this.logger.error(error);
+      // this.logger.error(error); // Descomenta si tienes el logger importado
       throw error;
     } finally {
       await queryRunner.release();
@@ -178,7 +185,7 @@ async aprobarCobranza(id: string, idAprobador: string) {
   }
 
   // =================================================================
-  // 4. ANULAR PAGO (REVERSAR SALDOS)
+  // 4. ANULAR PAGO (REVERSAR SALDOS) - CORREGIDO #10
   // =================================================================
   async anularCobranza(idCobranza: string) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -186,12 +193,18 @@ async aprobarCobranza(id: string, idAprobador: string) {
     await queryRunner.startTransaction();
 
     try {
-      const cobranza = await this.cobranzaRepo.findOne({
+      // 🚀 SOLUCIÓN #10: Usar queryRunner y añadir bloqueo pesimista
+      const cobranza = await queryRunner.manager.findOne(Cobranza, {
         where: { id_cobranza: idCobranza },
-        relations: ['facturas_afectadas', 'facturas_afectadas.factura']
+        relations: ['facturas_afectadas', 'facturas_afectadas.factura'],
+        lock: { mode: 'pessimistic_write' }
       });
 
-      if (!cobranza || cobranza.estado !== EstadoCobranza.APLICADA) {
+      if (!cobranza) {
+        throw new NotFoundException('Cobranza no encontrada');
+      }
+
+      if (cobranza.estado !== EstadoCobranza.APLICADA) {
         throw new BadRequestException('Solo se pueden anular cobranzas aplicadas');
       }
 
@@ -208,7 +221,9 @@ async aprobarCobranza(id: string, idAprobador: string) {
         );
       }
 
+      // 🚀 OTRA MEJORA: Actualizar usando el queryRunner en lugar del manager suelto
       await queryRunner.manager.update(Cobranza, { id_cobranza: idCobranza }, { estado: EstadoCobranza.ANULADA });
+      
       await queryRunner.commitTransaction();
       return { success: true };
     } catch (error) {
