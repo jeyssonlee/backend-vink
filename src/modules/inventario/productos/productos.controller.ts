@@ -31,6 +31,16 @@ export class ProductosController {
     return await this.productosService.importarProductos(file, idEmpresa);
   }
 
+  @Post('importar-precios')
+  @UseInterceptors(FileInterceptor('file'))
+  async importarPrecios(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('id_empresa') idEmpresa: string,
+  ) {
+    if (!file) throw new BadRequestException('No se subió ningún archivo');
+    return this.productosService.importarPreciosExcel(file, idEmpresa);
+  }
+
   @Get()
   async findAll(@Query('id_empresa') idEmpresa: string, @Req() req) {
     const empresa = idEmpresa || req.user.id_empresa;

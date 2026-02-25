@@ -30,75 +30,40 @@ export class CobranzasController {
     storage: diskStorage({
       destination: (req, file, cb) => {
         const uploadPath = join(process.cwd(), 'uploads', 'comprobantes');
-        // Mantenemos tu lógica de creación de carpeta
         if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
         cb(null, uploadPath);
       },
       filename: (req, file, cb) => {
         const uniqueName = randomUUID();
-        // Mantenemos tu UUID pero aseguramos la extensión
         cb(null, `${uniqueName}${extname(file.originalname)}`);
       },
     }),
-    // 🛡️ AQUÍ ESTÁ LA MEJORA DE SEGURIDAD (Hallazgo #11)
     fileFilter: (req, file, cb) => {
-      // Validamos tanto el Mimetype como la extensión real para que no nos engañen
       const allowedExtensions = /\.(jpg|jpeg|png|webp|pdf)$/;
       const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-
       if (allowedMimeTypes.includes(file.mimetype) && file.originalname.toLowerCase().match(allowedExtensions)) {
         cb(null, true);
       } else {
-        cb(new BadRequestException('Solo se permiten imágenes (jpg, png, webp) o archivos PDF'), false);
+        cb(new BadRequestException('Solo se permiten imágenes o PDF'), false);
       }
     },
   }))
-  // 🛡️ SEGUNDO ESCUDO: Validación de tamaño y obligatoriedad
-  uploadComprobante(
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
-        ],
-        fileIsRequired: true,
-      }),
-    ) file: Express.Multer.File,
-  ) {
-    return {
-      exito: true,
-      mensaje: 'Archivo validado y subido',
-      path: file.path,
-      filename: file.filename
-    };
-  }
-
-
-  async createWithUpload(
-    @UploadedFile() file: Express.Multer.File, 
-    @Body() body: any, 
+  async uploadYRegistrar(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
     @GetUser() user: any
   ) {
     if (!body.data) throw new BadRequestException('Faltan los datos del pago');
-    
-    // 1. Parseamos los datos
-    const datosPago = JSON.parse(body.data);
-
-    if (!file) {
-      this.logger.warn(`Solicitud de carga recibida sin archivo o archivo invalido. Usuario: ${user.id_usuario}`);
-    }
   
-    // 2. Inyectamos los datos del usuario y archivo
-    const payloadCompleto = {
+    const datosPago = JSON.parse(body.data);
+  
+    const payloadCompleto: CreateCobranzaDto = {
       ...datosPago,
       id_vendedor: user.id_usuario,
       id_empresa: user.id_empresa,
       fecha_reporte: datosPago.fecha_reporte || new Date().toISOString(),
-      // Forzamos la URL aquí:
-      url_comprobante: file ? `/comprobantes/${file.filename}` : null
+      url_comprobante: file ? `/uploads/comprobantes/${file.filename}` : null
     };
-  
-    // Este log DEBE mostrar url_comprobante ahora
-    console.log('Datos finales a procesar:', payloadCompleto); 
   
     return this.cobranzasService.create(payloadCompleto);
   }

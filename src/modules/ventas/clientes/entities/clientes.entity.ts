@@ -2,6 +2,18 @@ import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn, CreateDa
 import { Vendedor } from '../../vendedores/entities/vendedor.entity';
 import { Empresa } from '../../../core/empresa/entities/empresa.entity';
 
+export enum EstatusCliente {
+  ACTIVO = 'ACTIVO',
+  INACTIVO = 'INACTIVO',
+  MOROSO = 'MOROSO'
+}
+
+export enum TipoPrecio {
+  GRAN_MAYOR = 'GRAN_MAYOR',
+  MAYOR = 'MAYOR',
+  DETAL = 'DETAL' // Por defecto
+}
+
 @Entity('clientes')
 export class Cliente {
   @PrimaryGeneratedColumn('uuid') 
@@ -30,6 +42,18 @@ export class Cliente {
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   pais: string;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  limite_credito_monto: number; // Tope máximo de deuda permitida
+
+  @Column({ type: 'int', default: 0 })
+  dias_credito_default: number; // Días base para calcular vencimientos
+
+  @Column({ type: 'enum', enum: EstatusCliente, default: EstatusCliente.ACTIVO })
+  estatus: EstatusCliente; // Para ponerle un "Badge" rojo a los morosos en la ficha
+
+  @Column({ type: 'enum', enum: TipoPrecio, default: TipoPrecio.DETAL })
+  tipo_precio: TipoPrecio; // Excelente para saber qué lista de precios aplicarle
 
   @CreateDateColumn()
   fecha_registro: Date;

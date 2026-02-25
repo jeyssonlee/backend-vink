@@ -54,6 +54,7 @@ export class ProductosService {
     nuevo.proveedor = (dto.proveedor || null) as any;
     nuevo.descripcion = (dto.descripcion || null) as any;
     nuevo.codigo_barras = (dto.codigo_barras || null) as any;
+    nuevo.imagen = (dto.imagen || null) as any;
 
     const productoGuardado = await this.productoRepo.save(nuevo);
 
@@ -537,12 +538,13 @@ export class ProductosService {
       try {
         // A. Mapeo a tu DTO existente
         const dto = new CreateProductoDto();
-        dto.id_empresa = idEmpresa; // Vital para tu sistema multi-tenancy
+        dto.id_empresa = idEmpresa;
         dto.codigo = row['CODIGO'] ? String(row['CODIGO']) : `IMP-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
         dto.nombre = row['NOMBRE'];
         dto.precio_base = Number(row['PRECIO']) || 0;
         dto.marca = row['MARCA'] || null;
         dto.categoria = row['CATEGORIA'] || null;
+        dto.imagen = row['IMAGEN'] || row['Imagen'] || row['imagen'] || null;
         //dto.codigo_barras = row['CODIGO_BARRAS'] ? String(row['CODIGO_BARRAS']) : null;
 
         // B. Crear Producto (Usamos tu lógica existente para validar duplicados y crear precios)
@@ -586,6 +588,76 @@ export class ProductosService {
       procesados_exitosamente: procesados,
       errores: errores,
       detalles: detallesErrores
+    };
+  }
+
+  async importarPreciosExcel(file: Express.Multer.File, idEmpresa: string) {
+    // 1. Leer el Excel
+    const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const datosExcel = XLSX.utils.sheet_to_json(sheet);
+
+    let actualizados = 0;
+    let creados = 0;
+
+    // 2. Procesar fila por fila
+    for (const row of datosExcel as any[]) {
+      const codigoExcel = row['CODIGO'] ? String(row['CODIGO']).trim() : null;
+      // Extraemos tanto el nombre como la descripción por separado
+      const nombreExcel = row['NOMBRE'] ? String(row['NOMBRE']).trim() : null; 
+      const descripcionExcel = row['DESCRIPCION'] ? String(row['DESCRIPCION']).trim() : null;
+      const precioExcel = Number(row['PRECIO']) || 0;
+
+      if (!codigoExcel) continue; // Saltamos si no hay código
+
+      const productoExistente = await this.productoRepo.findOne({
+        where: { codigo: codigoExcel, id_empresa: idEmpresa }
+      });
+
+      if (productoExistente) {
+        // ACTUALIZAR
+        let requiereGuardar = false;
+        
+        if (productoExistente.precio_base !== precioExcel) {
+          productoExistente.precio_base = precioExcel;
+          requiereGuardar = true;
+        }
+        
+        // Actualizamos el nombre si viene en el Excel y es diferente
+        if (nombreExcel && productoExistente.nombre !== nombreExcel) {
+          productoExistente.nombre = nombreExcel;
+          requiereGuardar = true;
+        }
+
+        // Actualizamos la descripción si viene en el Excel y es diferente
+        if (descripcionExcel && productoExistente.descripcion !== descripcionExcel) {
+          productoExistente.descripcion = descripcionExcel;
+          requiereGuardar = true;
+        }
+
+        if (requiereGuardar) {
+          await this.productoRepo.save(productoExistente);
+          actualizados++;
+        }
+      } else {
+        // CREAR NUEVO
+        const nuevoProducto = this.productoRepo.create({
+          id_empresa: idEmpresa,
+          codigo: codigoExcel,
+          nombre: nombreExcel || 'Sin nombre', // Usamos el nombre del Excel
+          descripcion: descripcionExcel || undefined, // Usamos la descripción (o undefined si está vacía)
+          precio_base: precioExcel,
+        });
+        await this.productoRepo.save(nuevoProducto);
+        creados++;
+      }
+    }
+
+    return { 
+      mensaje: 'Proceso completado con éxito', 
+      creados, 
+      actualizados 
     };
   }
 

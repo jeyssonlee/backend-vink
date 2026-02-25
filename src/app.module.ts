@@ -27,6 +27,7 @@ import { FacturasModule } from './modules/ventas/facturas/facturas.module';
 import { CobranzasModule } from './modules/cobranzas/cobranzas.module';
 import { MonitorDolarModule } from './modules/utilidades/monitor-dolar/monitor-dolar.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { EstadisticasModule } from './modules/estadisticas/estadisticas.module';
 
 
 @Module({
@@ -83,7 +84,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     FacturasModule,
     CobranzasModule,
     MonitorDolarModule,
-    DashboardModule 
+    DashboardModule,
+    EstadisticasModule 
      ],
 })
 export class AppModule {}
