@@ -56,9 +56,11 @@ export class FacturasController {
   @Get()
   findAll(
     @Query('id_empresa') idEmpresa: string,
-    @Query('id_cliente') idCliente?: string, // 👈 El signo '?' lo hace opcional
+    @Query('id_cliente') idCliente?: string,
+    
   ) {
-    return this.facturasService.findAll(idEmpresa, idCliente);
+    // 🚀 2. Se las pasamos al servicio como tercer parámetro
+    return this.facturasService.findAll(idEmpresa, idCliente); 
   }
 
   // 6. Ver una Factura

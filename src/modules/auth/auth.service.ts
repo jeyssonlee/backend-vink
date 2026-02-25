@@ -41,14 +41,14 @@ export class AuthService {
       username: user.nombre_completo || user.correo, 
       rol: user.rol?.nombre,                   
       sucursalId: user.sucursal?.id_sucursal,  
-      id_empresa: user.empresa?.id_empresa || user.id_empresa 
+      id_empresa: user.empresa?.id || user.id_empresa
     };
     
     return {
       access_token: this.jwtService.sign(payload),
       usuario: {
         id: user.id,
-        id_empresa: user.id_empresa || user.empresa?.id_empresa,
+        id_empresa: user.id_empresa || user.empresa?.id,
         nombre: user.nombre_completo,
         email: user.correo,
         rol: user.rol?.nombre,

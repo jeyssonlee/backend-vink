@@ -4,18 +4,19 @@ import { Repository } from 'typeorm';
 import { Vendedor } from './entities/vendedor.entity';
 import { CreateVendedorDto } from './dto/create-vendedor.dto';
 import * as bcrypt from 'bcrypt'; 
+import { UsuariosService } from 'src/modules/core/usuarios/usuarios.service';
 
 @Injectable()
 export class VendedoresService {
   constructor(
     @InjectRepository(Vendedor)
     private readonly vendedorRepo: Repository<Vendedor>,
+    private readonly usuariosService: UsuariosService,
   ) {}
 
   // 1. Crear
   async crear(data: CreateVendedorDto): Promise<Vendedor> {
     try {
-      // Hasheamos la contraseña antes de crear la instancia
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(data.contrasena, salt);
 
@@ -24,9 +25,25 @@ export class VendedoresService {
         contrasena: hashedPassword,
       });
 
-      return await this.vendedorRepo.save(nuevoVendedor);
+      const vendedorGuardado = await this.vendedorRepo.save(nuevoVendedor);
+
+      // ✅ CREAR USUARIO AUTOMÁTICAMENTE
+      const correo = data.usuario.includes('@')
+        ? data.usuario
+        : `${data.usuario}@empresa.com`;
+
+      await this.usuariosService.crear({
+        nombre_completo: data.nombre_apellido,
+        correo,
+        clave: data.contrasena, // La clave sin hashear, el servicio la hashea internamente
+        rol: 'VENDEDOR' as any,
+        id_empresa: data.id_empresa,
+        id_sucursal: undefined as any,
+      });
+
+      return vendedorGuardado;
+
     } catch (error) {
-      // Postgres error 23505 = Unique Violation
       if (error.code === '23505') {
         throw new ConflictException('La cédula o el usuario ya existen en el sistema.');
       }

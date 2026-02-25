@@ -28,6 +28,6 @@ export class CrearUsuarioDto {
   id_empresa: string;
 
   @IsUUID('4')
-  @IsNotEmpty()
+  @IsOptional()
   id_sucursal: string; // Faltaba vincularlo a una sucursal física
 }

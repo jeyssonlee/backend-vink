@@ -1,9 +1,8 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, OneToMany, UpdateDateColumn } from 'typeorm';
 import { Cliente } from '../../clientes/entities/clientes.entity';
 import { Empresa } from 'src/modules/core/empresa/entities/empresa.entity'; 
-import { Usuario } from '../../../core/usuarios/entities/usuarios.entity';
 import { FacturaDetalle } from './factura-detalle.entity';
-// 👇 Importamos la nueva entidad de historial de pagos
+import { Vendedor } from '../../vendedores/entities/vendedor.entity';
 import { CobranzaFactura } from 'src/modules/cobranzas/entities/cobranza-factura.entity';
 
 export enum MetodoPago {
@@ -108,9 +107,9 @@ export class Factura {
   @JoinColumn({ name: 'id_empresa' })
   empresa: Empresa;
 
-  @ManyToOne(() => Usuario)
+  @ManyToOne(() => Vendedor, { nullable: true })
   @JoinColumn({ name: 'id_vendedor' })
-  vendedor: Usuario; 
+  vendedor: Vendedor;
   
   get numero_completo(): string {
     if (this.estado === EstadoFactura.BORRADOR || !this.numero_consecutivo) {

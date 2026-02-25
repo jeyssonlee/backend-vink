@@ -38,7 +38,7 @@ export class FacturasService {
       if (dto.id_pedido) {
         const pedido = await queryRunner.manager.findOne(Pedido, {
           where: { id_pedido: dto.id_pedido, id_empresa: idEmpresa },
-          relations: ['detalles', 'detalles.producto', 'cliente']
+          relations: ['detalles', 'detalles.producto', 'cliente', 'cliente.vendedor']
         });
         if (!pedido) throw new NotFoundException('Pedido no encontrado');
         if (pedido.estado === 'FACTURADO') throw new ConflictException('Pedido ya facturado');
@@ -55,7 +55,8 @@ export class FacturasService {
         if (!dto.id_cliente) throw new BadRequestException("El cliente es obligatorio para venta directa");
         
         cliente = await queryRunner.manager.findOne(Cliente, { 
-            where: { id_cliente: dto.id_cliente, empresa: { id: idEmpresa } } 
+            where: { id_cliente: dto.id_cliente, empresa: { id: idEmpresa } },
+            relations: ['vendedor'] 
         });
         if (!cliente) throw new NotFoundException("Cliente no encontrado");
 
@@ -97,6 +98,13 @@ export class FacturasService {
 
         const precioVenta = Number(item.precio || 0); 
         const cantidad = Number(item.cantidad || 0);
+
+        if (costoUnitario > 0 && precioVenta < costoUnitario) {
+          throw new BadRequestException(
+              `El precio de "${prod.nombre}" ($${precioVenta}) es menor al costo ($${costoUnitario.toFixed(2)}). No se puede procesar la venta.`
+          );
+      }
+
         const totalLinea = precioVenta * cantidad;
 
         subtotalBase += totalLinea;
@@ -172,7 +180,7 @@ export class FacturasService {
         id_pedido_origen: dto.id_pedido,
         cliente: cliente as import('typeorm').DeepPartial<Factura>['cliente'],
         empresa: { id: idEmpresa } as import('typeorm').DeepPartial<Factura>['empresa'],
-        vendedor: usuario, // ✅ Aquí asignamos el vendedor correctamente
+        vendedor: cliente?.vendedor ? { id_vendedor: cliente.vendedor.id_vendedor } : undefined,
         detalles: detallesFactura
       };
 
@@ -195,13 +203,15 @@ export class FacturasService {
             if (!almacenVenta) throw new ConflictException("No se encontró un Almacén de Venta configurado.");
 
             for (const det of detallesFactura) {
-                await queryRunner.manager.query(`
-                    UPDATE inventarios 
-                    SET cantidad = cantidad - $1, updated_at = NOW()
-                    WHERE id_producto = $2 AND id_almacen = $3 AND id_empresa = $4
-                `, [det.cantidad, det.producto.id_producto, almacenVenta.id_almacen, idEmpresa]);
-            }
-        }
+              await this.productosService.registrarSalidaDirecta(
+                  det.producto.id_producto,
+                  det.cantidad,
+                  idEmpresa,
+                  `Venta Directa: ${serie}-${String(numeroConsecutivo).padStart(6, '0')}`,
+                  queryRunner
+              );
+          }
+      }
       }
 
       await queryRunner.commitTransaction();
@@ -384,26 +394,23 @@ export class FacturasService {
   // 5. LISTAR Y BUSCAR
   // ==========================================================
   async findAll(idEmpresa: string, idCliente?: string) {
-    // 1. Obtenemos el repositorio usando tu dataSource
-    const facturaRepo = this.dataSource.getRepository(Factura);
-
-    // 2. Armamos el filtro dinámico
-    const whereClause: any = { 
-      empresa: { id: idEmpresa } // Cambia 'id' por 'id_empresa' si tu entidad usa id_empresa
+    const opcionesBusqueda: any = {
+      where: { empresa: { id: idEmpresa } },
+      order: { fecha_emision: 'DESC' },
+      relations: ['detalles', 'detalles.producto', 'vendedor', 'cliente'],
     };
-
-    // 3. ¡LA MAGIA! Si enviaron un cliente, lo agregamos al filtro
+  
     if (idCliente) {
-      whereClause.cliente = { id_cliente: idCliente }; 
+      opcionesBusqueda.where.cliente = { id_cliente: idCliente };
     }
-
-    // 4. Ejecutamos la búsqueda
-    return facturaRepo.find({
-      where: whereClause,
-      relations: ['cliente', 'cliente.vendedor', 'vendedor'], // Ajusta estas relaciones según lo que uses en Facturas
-      order: { fecha_emision: 'DESC' } // Si tu fecha se llama distinto (ej: fecha_emision), cámbialo aquí
-    });
-}
+  
+    try {
+      return await this.dataSource.getRepository(Factura).find(opcionesBusqueda);
+    } catch (error) {
+      this.logger.error(`Error buscando facturas: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
 
   async findOne(id: string) {
       return await this.dataSource.getRepository(Factura).findOne({

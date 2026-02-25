@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, ParseUUIDPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, ParseUUIDPipe, UseGuards, Query } from '@nestjs/common'; // 👈 Agregamos Query aquí
 import { SucursalesService } from './sucursales.service';
 import { CreateSucursalDto } from './dto/create-sucursal.dto';
 import { UpdateSucursalDto } from './dto/update-sucursal.dto';
@@ -14,9 +14,11 @@ export class SucursalesController {
     return await this.sucursalesService.create(createSucursalDto);
   }
 
+  // 👇 Modificamos esta función para que reciba la empresa
   @Get()
-  async findAll() {
-    return await this.sucursalesService.findAll();
+  async findAll(@Query('id_empresa') idEmpresa: string) {
+    // Asegúrate de que tu servicio esté preparado para recibir este parámetro
+    return await this.sucursalesService.findAll(idEmpresa);
   }
 
   @Get(':id')
