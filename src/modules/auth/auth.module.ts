@@ -7,10 +7,12 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { Rol } from './roles/entities/rol.entity';
+import { PermisosGuard } from './guards/permisos.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Usuario]),
+    TypeOrmModule.forFeature([Usuario, Rol]),
     PassportModule,
     ConfigModule,
     JwtModule.registerAsync({
@@ -22,8 +24,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [
+     AuthService,
+     JwtStrategy,
+     PermisosGuard,
+    ],
   controllers: [AuthController],
-  exports: [AuthService], // Exportamos por si acaso
+  exports: [AuthService, PermisosGuard], // Exportamos por si acaso
 })
 export class AuthModule {}

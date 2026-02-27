@@ -2,28 +2,22 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CobranzasService } from './cobranzas.service';
 import { CobranzasController } from './cobranzas.controller';
-
-// Entidades Propias
 import { Cobranza } from './entities/cobranza.entity';
 import { CobranzaMetodo } from './entities/cobranza-metodo.entity';
 import { CobranzaFactura } from './entities/cobranza-factura.entity';
-
-// Entidades Externas (Necesarias para validar y actualizar)
-import { Factura } from '../ventas/facturas/entities/factura.entity'; // ⚠️ Ajusta ruta
-import { Usuario } from '../core/usuarios/entities/usuarios.entity'; // ⚠️ Ajusta ruta
+import { Factura } from '../ventas/facturas/entities/factura.entity';
+import { Usuario } from '../core/usuarios/entities/usuarios.entity';
+import { Rol } from '../auth/roles/entities/rol.entity';
+import { PermisosGuard } from '../auth/guards/permisos.guard';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      Cobranza,
-      CobranzaMetodo,
-      CobranzaFactura,
-      Factura,
-      Usuario
+      Cobranza, CobranzaMetodo, CobranzaFactura, Factura, Usuario, Rol
     ])
   ],
   controllers: [CobranzasController],
-  providers: [CobranzasService],
-  exports: [CobranzasService]
+  providers: [CobranzasService, PermisosGuard],
+  exports: [CobranzasService],
 })
 export class CobranzasModule {}

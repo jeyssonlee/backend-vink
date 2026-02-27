@@ -8,10 +8,13 @@ import { randomUUID } from 'crypto';
 import { CobranzasService } from './cobranzas.service';
 import { CreateCobranzaDto } from './dto/create-cobranza.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'; 
-import { GetUser } from '../auth/decorators/get-user.decorator'; 
+import { GetUser } from '../auth/decorators/get-user.decorator';
+import { PermisosGuard } from '../auth/guards/permisos.guard';
+import { Permisos } from '../auth/decorators/permisos.decorator';
+import { Permiso } from '../auth/permisos.enum';
 
 @Controller('cobranzas')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermisosGuard)
 export class CobranzasController {
   private readonly logger = new Logger(CobranzasController.name);
 
@@ -69,22 +72,26 @@ export class CobranzasController {
   }
 
   @Get('pendientes')
+  @Permisos(Permiso.VER_COBRANZAS)
   getPendientes(@GetUser() user: any) {
     return this.cobranzasService.findAllPendientes(user.id_empresa);
   }
 
   // NUEVO: Ruta para ver todas las cobranzas (Historial)
   @Get()
+  @Permisos(Permiso.VER_COBRANZAS)
   findAll(@GetUser() user: any) {
     return this.cobranzasService.findAll(user.id_empresa);
   }
 
   @Patch(':id/aprobar')
+  @Permisos(Permiso.APROBAR_COBRANZAS)
   aprobar(@Param('id') id: string, @GetUser() admin: any) {
     return this.cobranzasService.aprobarCobranza(id, admin.id_usuario);
   }
 
   @Patch(':id/rechazar')
+  @Permisos(Permiso.RECHAZAR_COBRANZAS)
   rechazar(@Param('id') id: string, @GetUser() admin: any, @Body('motivo') motivo: string) {
     return this.cobranzasService.rechazarCobranza(id, admin.id_usuario, motivo);
   }
@@ -101,6 +108,7 @@ export class CobranzasController {
   }
 
   @Patch(':id/anular')
+  @Permisos(Permiso.APROBAR_COBRANZAS)
   anularCobranza(@Param('id') id: string) {
     return this.cobranzasService.anularCobranza(id);
   }

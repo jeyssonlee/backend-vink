@@ -10,6 +10,7 @@ import { Cliente } from '../ventas/clientes/entities/clientes.entity';
 import { Factura } from '../ventas/facturas/entities/factura.entity';
 import { FacturaDetalle } from '../ventas/facturas/entities/factura-detalle.entity';
 import { CobranzaMetodo } from '../cobranzas/entities/cobranza-metodo.entity';
+import { Cobranza } from '../cobranzas/entities/cobranza.entity';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { CobranzaMetodo } from '../cobranzas/entities/cobranza-metodo.entity';
       Cliente, 
       Factura, 
       FacturaDetalle, 
-      CobranzaMetodo
+      CobranzaMetodo,
+      Cobranza
     ])
   ],
   controllers: [FichaClienteController],

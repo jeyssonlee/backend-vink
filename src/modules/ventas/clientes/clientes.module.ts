@@ -3,11 +3,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Cliente } from './entities/clientes.entity';
 import { ClientesService } from './clientes.service';
 import { ClientesController } from './clientes.controller';
+import { Rol } from 'src/modules/auth/roles/entities/rol.entity';
+import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Cliente])], // Aquí se registra la entidad
+  imports: [TypeOrmModule.forFeature([Cliente, Rol])],
   controllers: [ClientesController],
-  providers: [ClientesService],
-  exports: [ClientesService], // Lo exportamos para que SyncModule pueda usarlo
+  providers: [ClientesService, PermisosGuard],
+  exports: [ClientesService],
 })
 export class ClientesModule {}

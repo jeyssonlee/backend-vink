@@ -2,69 +2,48 @@ import { Controller, Post, Body, Get, Param, Patch, UseGuards, Req, ParseUUIDPip
 import { FacturasService } from './facturas.service';
 import { CrearFacturaDto } from './dto/crear-factura.dto';
 import { CrearFacturaLoteDto } from './dto/crear-factura-lote.dto';
-// Asegúrate de que esta ruta sea correcta según tu estructura
-import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard'; 
+import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard';
+import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
+import { Permisos } from 'src/modules/auth/decorators/permisos.decorator';
+import { Permiso } from 'src/modules/auth/permisos.enum';
 
 @Controller('facturas')
-@UseGuards(JwtAuthGuard) 
+@UseGuards(JwtAuthGuard, PermisosGuard)
 export class FacturasController {
   constructor(private readonly facturasService: FacturasService) {}
 
-  // 1. Crear Factura (Individual)
   @Post()
-  create(@Body() createFacturaDto: CrearFacturaDto, @Req() req: any) {
-    // Pasamos el usuario completo del request (req.user)
-    return this.facturasService.crear(createFacturaDto, req.user);
+  @Permisos(Permiso.CREAR_VENTAS)
+  create(@Body() dto: CrearFacturaDto, @Req() req: any) {
+    return this.facturasService.crear(dto, req.user);
   }
 
-  // 2. Procesar Lote Masivo
   @Post('masivo')
+  @Permisos(Permiso.CREAR_VENTAS)
   async crearMasivo(@Body() dto: CrearFacturaLoteDto, @Req() req: any) {
-    return await this.facturasService.crearLote(
-      dto, 
-      req.user.id_empresa,             
-      req.user.id_usuario 
-    );
+    return await this.facturasService.crearLote(dto, req.user.id_empresa, req.user.id_usuario);
   }
 
-  // 3. Confirmar un Borrador
   @Patch(':id/confirmar')
+  @Permisos(Permiso.CREAR_VENTAS)
   async confirmarBorrador(@Param('id', ParseUUIDPipe) id: string, @Req() req: any) {
-    return await this.facturasService.confirmarBorrador(
-      id, 
-      req.user.id_empresa
-    );
+    return await this.facturasService.confirmarBorrador(id, req.user.id_empresa);
   }
 
-  // 4. Anular Factura
   @Patch(':id/anular')
-  async anular(
-    @Param('id', ParseUUIDPipe) id: string, 
-    @Body() body: { motivo?: string }, 
-    @Req() req: any
-  ) {
-    const motivo = body?.motivo || 'Sin motivo especificado';
-    return await this.facturasService.anular(
-      id, 
-      motivo, 
-      req.user.id_usuario,
-      req.user.id_empresa
-    );
+  @Permisos(Permiso.ANULAR_VENTAS)
+  async anular(@Param('id', ParseUUIDPipe) id: string, @Body() body: { motivo?: string }, @Req() req: any) {
+    return await this.facturasService.anular(id, body?.motivo || 'Sin motivo', req.user.id_usuario, req.user.id_empresa);
   }
 
-  // 5. Listar Facturas
   @Get()
-  findAll(
-    @Query('id_empresa') idEmpresa: string,
-    @Query('id_cliente') idCliente?: string,
-    
-  ) {
-    // 🚀 2. Se las pasamos al servicio como tercer parámetro
-    return this.facturasService.findAll(idEmpresa, idCliente); 
+  @Permisos(Permiso.VER_VENTAS)
+  findAll(@Query('id_empresa') idEmpresa: string, @Query('id_cliente') idCliente?: string) {
+    return this.facturasService.findAll(idEmpresa, idCliente);
   }
 
-  // 6. Ver una Factura
   @Get(':id')
+  @Permisos(Permiso.VER_VENTAS)
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return await this.facturasService.findOne(id);
   }

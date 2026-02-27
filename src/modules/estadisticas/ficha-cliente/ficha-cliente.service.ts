@@ -7,7 +7,7 @@ import { Cliente } from 'src/modules/ventas/clientes/entities/clientes.entity';
 import { Factura, EstadoFactura } from 'src/modules/ventas/facturas/entities/factura.entity';
 import { FacturaDetalle } from 'src/modules/ventas/facturas/entities/factura-detalle.entity';
 import { CobranzaMetodo } from 'src/modules/cobranzas/entities/cobranza-metodo.entity';
-import { EstadoCobranza } from 'src/modules/cobranzas/entities/cobranza.entity';
+import { Cobranza, EstadoCobranza } from 'src/modules/cobranzas/entities/cobranza.entity';
 
 @Injectable()
 export class FichaClienteService {
@@ -16,6 +16,7 @@ export class FichaClienteService {
     @InjectRepository(Factura) private facturaRepo: Repository<Factura>,
     @InjectRepository(FacturaDetalle) private detalleRepo: Repository<FacturaDetalle>,
     @InjectRepository(CobranzaMetodo) private metodosPagoRepo: Repository<CobranzaMetodo>,
+    @InjectRepository(Cobranza) private cobranzaRepo: Repository<Cobranza>,
   ) {}
 
   async obtenerDatosFicha(idCliente: string, idEmpresa: string) {
@@ -34,7 +35,9 @@ export class FichaClienteService {
       deudaVivaResult,
       topProductos,
       metodosPago,
-      evolucionMensual
+      evolucionMensual,
+      ultimasFacturas,
+      ultimosPagos
     ] = await Promise.all([
 
       // A. KPIs Generales (Ticket Promedio, Total Comprado, Total Ganancia)
@@ -100,8 +103,29 @@ export class FichaClienteService {
         .andWhere("f.fecha_emision >= NOW() - INTERVAL '6 MONTHS'") // Filtro nativo de Postgres
         .groupBy("TO_CHAR(f.fecha_emision, 'YYYY-MM')")
         .orderBy('mes', 'ASC')
-        .getRawMany()
+        .getRawMany(),
+
+      // F. Últimas 20 facturas del cliente 🚀 (Nueva consulta)
+      this.facturaRepo.find({
+        where: { 
+          cliente: { id_cliente: idCliente },
+          empresa: { id: idEmpresa },
+        },
+        order: { fecha_emision: 'DESC' },
+        take: 20,
+      }),
+      // G. Últimos 20 pagos (cobranzas) del cliente
+      this.cobranzaRepo.find({
+        where: { 
+          cliente: { id_cliente: idCliente },
+          empresa: { id: idEmpresa },
+        },
+        order: { fecha_reporte: 'DESC' },
+        take: 20,
+      })
     ]);
+
+    
 
     // 3. Formateamos y retornamos el DTO limpio para el Frontend
     return {
@@ -135,7 +159,25 @@ export class FichaClienteService {
           name: m.metodo, 
           total: Number(m.total) 
         }))
-      }
+      },
+      // 🚀 Añadimos el nuevo arreglo mapeado de facturas
+      facturas: ultimasFacturas.map(fac => ({
+        id_factura: fac.id_factura,
+        numero_factura: fac.numero_completo,
+        fecha_emision: fac.fecha_emision,
+        // Validamos 'total_pagar' o la propiedad equivalente que uses en tu entity
+        total: Number(fac.total_pagar || 0), 
+        saldo_pendiente: Number(fac.saldo_pendiente || 0),
+        estado: fac.estado,
+      })),
+
+      pagos: ultimosPagos.map(pago => ({
+        id_cobranza: pago.id_cobranza,
+        numero_recibo: pago.consecutivo || 'S/N',
+        fecha: pago.fecha_reporte || pago.created_at,
+        monto: Number(pago.monto_total || 0),
+        estado: pago.estado,
+      }))
     };
   }
 }

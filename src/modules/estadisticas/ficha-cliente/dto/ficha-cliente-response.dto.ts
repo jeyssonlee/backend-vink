@@ -44,4 +44,22 @@ export class ClienteBasicoDto {
     cliente: ClienteBasicoDto;
     kpis: KpisFinancierosDto;
     graficas: GraficasFichaClienteDto;
+    facturas: FacturaBasicaDto[];
+  }
+
+  export class FacturaBasicaDto {
+    id_factura: string;
+    numero_factura: string;
+    fecha_emision: Date;
+    total: number;
+    saldo_pendiente: number;
+    estado: string;
+  }
+
+  export class PagoBasicoDto {
+    id_cobranza: string;
+    numero_recibo: string;
+    fecha: Date;
+    monto: number;
+    estado: string;
   }
