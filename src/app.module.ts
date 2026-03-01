@@ -28,6 +28,7 @@ import { CobranzasModule } from './modules/cobranzas/cobranzas.module';
 import { MonitorDolarModule } from './modules/utilidades/monitor-dolar/monitor-dolar.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { EstadisticasModule } from './modules/estadisticas/estadisticas.module';
+import { OnboardingModule } from './modules/core/onboarding/onboarding.module';
 
 
 @Module({
@@ -58,7 +59,7 @@ import { EstadisticasModule } from './modules/estadisticas/estadisticas.module';
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'), // Busca la carpeta uploads en la raíz
       serveRoot: '/uploads', // La URL será http://localhost:3000/uploads/...
-      exclude: ['/api/(.*)'],
+     
     }),
 
     //  Configuración Global de RabbitMQ [cite: 57, 62]
@@ -85,7 +86,8 @@ import { EstadisticasModule } from './modules/estadisticas/estadisticas.module';
     CobranzasModule,
     MonitorDolarModule,
     DashboardModule,
-    EstadisticasModule 
+    EstadisticasModule,
+    OnboardingModule 
      ],
 })
 export class AppModule {}

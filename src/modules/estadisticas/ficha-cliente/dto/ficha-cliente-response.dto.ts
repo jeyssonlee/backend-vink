@@ -8,6 +8,10 @@ export class ClienteBasicoDto {
     estatus: string;
     tipo_precio: string;
     telefono: string;
+    direccion_fiscal?: string;
+    direccion_entrega?: string;
+    vendedor?: any; 
+    deuda_total?: number;
   }
   
   export class KpisFinancierosDto {

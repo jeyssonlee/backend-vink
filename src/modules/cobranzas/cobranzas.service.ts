@@ -193,11 +193,11 @@ async aprobarCobranza(id: string, idAprobador: string) {
     await queryRunner.startTransaction();
 
     try {
-      // 🚀 SOLUCIÓN #10: Usar queryRunner y añadir bloqueo pesimista
+      // 🚀 SOLUCIÓN: Quitamos el "lock: { mode: 'pessimistic_write' }"
+      // Postgres prohíbe bloquear filas en consultas que usan LEFT JOIN.
       const cobranza = await queryRunner.manager.findOne(Cobranza, {
         where: { id_cobranza: idCobranza },
-        relations: ['facturas_afectadas', 'facturas_afectadas.factura'],
-        lock: { mode: 'pessimistic_write' }
+        relations: ['facturas_afectadas', 'facturas_afectadas.factura']
       });
 
       if (!cobranza) {
@@ -221,7 +221,6 @@ async aprobarCobranza(id: string, idAprobador: string) {
         );
       }
 
-      // 🚀 OTRA MEJORA: Actualizar usando el queryRunner en lugar del manager suelto
       await queryRunner.manager.update(Cobranza, { id_cobranza: idCobranza }, { estado: EstadoCobranza.ANULADA });
       
       await queryRunner.commitTransaction();
@@ -235,7 +234,7 @@ async aprobarCobranza(id: string, idAprobador: string) {
   }
 
   // =================================================================
-  // 5. REGISTRAR PAGO MANUAL (CAJA)
+  // 5. REGISTRAR PAGO MANUAL (CAJA) - BLINDADO CON VENDEDOR HEREDADO
   // =================================================================
   async createManual(data: any) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -243,72 +242,108 @@ async aprobarCobranza(id: string, idAprobador: string) {
     await queryRunner.startTransaction();
 
     try {
-        const payload: any = {
-            consecutivo: await this.generarConsecutivo(data.id_empresa),
-            fecha_reporte: data.fecha_reporte,
-            monto_total: data.monto_total,
-            nota_vendedor: data.nota_vendedor,
-            estado: EstadoCobranza.APLICADA,
-            fecha_aprobacion: new Date(),
-            origen: 'CAJA',
-            cliente: { id_cliente: data.id_cliente },
-            empresa: { id: data.id_empresa },
-        };
+        // 🚀 LÓGICA DE VENDEDOR HEREDADO AUTOMÁTICO
+        let idVendedorHeredado = data.id_vendedor;
 
-        const nuevaCobranza = this.cobranzaRepo.create(payload);
-        const cobradoGuardado = (await queryRunner.manager.save(nuevaCobranza)) as unknown as Cobranza;
+        // 1. Heredar de la factura (si aplica)
+        if (!idVendedorHeredado && data.facturas && data.facturas.length > 0) {
+            const fInfo = await queryRunner.manager.query(
+                `SELECT id_vendedor FROM facturas WHERE id_factura = $1 LIMIT 1`, [data.facturas[0].id_factura]
+            );
+            if (fInfo.length > 0) idVendedorHeredado = fInfo[0].id_vendedor;
+        }
 
+        // 2. Fallback: Heredar del perfil del cliente
+        if (!idVendedorHeredado && data.id_cliente) {
+            const cInfo = await queryRunner.manager.query(
+                `SELECT id_vendedor FROM clientes WHERE id_cliente = $1 LIMIT 1`, [data.id_cliente]
+            );
+            if (cInfo.length > 0) idVendedorHeredado = cInfo[0].id_vendedor;
+        }
+
+        // Consecutivo manual
+        const ultima = await queryRunner.manager.findOne(Cobranza, {
+          where: { empresa: { id: data.id_empresa } as any },
+          order: { consecutivo: 'DESC' }
+        });
+        const consecutivo = ultima ? (Number(ultima.consecutivo) + 1).toString().padStart(6, '0') : '000001';
+
+        // 🚀 SOLUCIÓN TYPEORM: Inserción SQL cruda para evitar "UpdateValuesMissingError" por cascadas fantasma
+        const resCobranza = await queryRunner.manager.query(
+          `INSERT INTO cobranzas (
+              consecutivo, fecha_reporte, monto_total, nota_vendedor, 
+              estado, fecha_aprobacion, origen, id_cliente, id_empresa, id_vendedor, id_aprobador, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING id_cobranza`,
+          [
+              consecutivo,
+              data.fecha_reporte || new Date(),
+              data.monto_total,
+              data.nota_vendedor || null,
+              EstadoCobranza.APLICADA,
+              new Date(),
+              'CAJA',
+              data.id_cliente,
+              data.id_empresa,
+              idVendedorHeredado || null,
+              data.id_aprobador || null // <-- $11 El usuario del token
+          ]
+      );
+        const idCobranzaGuardada = resCobranza[0].id_cobranza;
+
+        // Métodos de pago
         if (data.metodos) {
             for (const metodo of data.metodos) {
-                const nuevoMetodo = queryRunner.manager.create(CobranzaMetodo, {
-                    cobranza: cobradoGuardado,
-                    metodo: metodo.metodo,
-                    monto: metodo.monto,
-                    referencia: metodo.referencia || null,
-                    banco: metodo.banco,
-                    empresa: { id: data.id_empresa }
-                });
-                await queryRunner.manager.save(nuevoMetodo);
+                await queryRunner.manager.query(
+                    `INSERT INTO cobranza_metodos (id_cobranza, metodo, monto, referencia, banco, id_empresa)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [idCobranzaGuardada, metodo.metodo, metodo.monto, metodo.referencia || null, metodo.banco || null, data.id_empresa]
+                );
             }
         }
 
+        // Facturas y Saldos
         if (data.facturas) {
             let montoDisponible = Number(data.monto_total);
 
             for (const item of data.facturas) {
-                const factura = await queryRunner.manager.findOne(Factura, { where: { id_factura: item.id_factura } });
-                if (!factura) continue;
-
+                const resFactura = await queryRunner.manager.query(
+                    `SELECT id_factura, saldo_pendiente, monto_pagado FROM facturas WHERE id_factura = $1 LIMIT 1`,
+                    [item.id_factura]
+                );
+                if (resFactura.length === 0) continue;
+                
+                const factura = resFactura[0];
                 let montoAAplicar = Number(item.monto_aplicado || 0);
+                const deuda = Number(factura.saldo_pendiente);
+                
                 if (montoAAplicar <= 0) {
-                    const deuda = Number(factura.saldo_pendiente);
                     montoAAplicar = (montoDisponible >= deuda) ? deuda : montoDisponible;
                 }
 
                 if (montoAAplicar > 0) {
-                    const saldoAnterior = Number(factura.saldo_pendiente);
-                    factura.monto_pagado = Number((Number(factura.monto_pagado) + montoAAplicar).toFixed(2));
-                    factura.saldo_pendiente = Number((saldoAnterior - montoAAplicar).toFixed(2));
-                    
-                    factura.estado = factura.saldo_pendiente <= 0.01 ? EstadoFactura.PAGADA : EstadoFactura.PARCIAL;
+                    const nuevoPagado = Number((Number(factura.monto_pagado) + montoAAplicar).toFixed(2));
+                    const nuevoSaldo = Number((deuda - montoAAplicar).toFixed(2));
+                    const nuevoEstado = nuevoSaldo <= 0.01 ? EstadoFactura.PAGADA : EstadoFactura.PARCIAL;
 
-                    await queryRunner.manager.save(factura);
+                    // Actualización directa, ultra rápida y sin bugs
+                    await queryRunner.manager.query(
+                        `UPDATE facturas SET monto_pagado = $1, saldo_pendiente = $2, estado = $3 WHERE id_factura = $4`,
+                        [nuevoPagado, nuevoSaldo, nuevoEstado, factura.id_factura]
+                    );
 
-                    const detalle = queryRunner.manager.create(CobranzaFactura, {
-                        cobranza: cobradoGuardado,
-                        factura: factura,
-                        monto_aplicado: montoAAplicar,
-                        saldo_anterior: saldoAnterior,
-                        saldo_nuevo: factura.saldo_pendiente
-                    });
-                    await queryRunner.manager.save(detalle);
+                    await queryRunner.manager.query(
+                        `INSERT INTO cobranza_facturas (id_cobranza, id_factura, monto_aplicado, saldo_anterior, saldo_nuevo)
+                         VALUES ($1, $2, $3, $4, $5)`,
+                        [idCobranzaGuardada, factura.id_factura, montoAAplicar, deuda, nuevoSaldo]
+                    );
+
                     montoDisponible -= montoAAplicar;
                 }
             }
         }
 
         await queryRunner.commitTransaction();
-        return { success: true, id_cobranza: cobradoGuardado.id_cobranza };
+        return { success: true, id_cobranza: idCobranzaGuardada };
 
     } catch (error) {
         await queryRunner.rollbackTransaction();

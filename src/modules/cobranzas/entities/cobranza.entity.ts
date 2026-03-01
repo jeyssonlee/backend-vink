@@ -3,8 +3,8 @@ import { CobranzaMetodo } from './cobranza-metodo.entity';
 import { CobranzaFactura } from './cobranza-factura.entity';
 import { Usuario } from '../../core/usuarios/entities/usuarios.entity';
 import { Empresa } from '../../core/empresa/entities/empresa.entity';
-// 👇 IMPORTANTE: Importar Cliente
 import { Cliente } from 'src/modules/ventas/clientes/entities/clientes.entity';
+import { Vendedor } from 'src/modules/ventas/vendedores/entities/vendedor.entity';
 
 export enum EstadoCobranza {
   POR_CONCILIAR = 'POR_CONCILIAR',
@@ -48,10 +48,10 @@ export class Cobranza {
   @JoinColumn({ name: 'id_cliente' })
   cliente: Cliente;
 
-  @ManyToOne(() => Usuario)
+  @ManyToOne(() => Vendedor)
   @JoinColumn({ name: 'id_vendedor' })
-  vendedor: Usuario; 
-
+  vendedor: Vendedor;
+  
   @ManyToOne(() => Usuario, { nullable: true })
   @JoinColumn({ name: 'id_aprobador' })
   aprobador: Usuario; 

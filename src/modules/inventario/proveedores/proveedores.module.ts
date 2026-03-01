@@ -3,11 +3,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProveedoresService } from './proveedores.service';
 import { ProveedoresController } from './proveedores.controller';
 import { Proveedor } from './entities/proveedor.entity';
+import { Rol } from 'src/modules/auth/roles/entities/rol.entity';
+import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Proveedor])], // 👈 Registramos la entidad aquí
+  imports: [TypeOrmModule.forFeature([Proveedor, Rol])],
   controllers: [ProveedoresController],
-  providers: [ProveedoresService],
-  exports: [ProveedoresService] // 👈 Lo exportamos porque Compras lo usará después
+  providers: [ProveedoresService, PermisosGuard],
+  exports: [ProveedoresService],
 })
 export class ProveedoresModule {}

@@ -1,9 +1,9 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { MonitorDolarService } from './monitor-dolar.service';
-import { AuthGuard } from '@nestjs/passport'; 
+import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard';
 
 @Controller('monitor-dolar')
-@UseGuards(AuthGuard('jwt')) // 🛡️ Lo protegemos para que solo usuarios de Vink-ERP lo usen
+@UseGuards(JwtAuthGuard)
 export class MonitorDolarController {
   constructor(private readonly monitorDolarService: MonitorDolarService) {}
 

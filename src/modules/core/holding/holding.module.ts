@@ -1,13 +1,15 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Holding } from './entities/holding.entity';
-// Si vas a crear controlador y servicio luego, los agregas aquí.
-// Por ahora, registramos la entidad para que se cree la tabla.
+import { HoldingService } from './holding.service';
+import { HoldingController } from './holding.controller';
+import { Rol } from 'src/modules/auth/roles/entities/rol.entity';
+import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Holding])],
-  controllers: [],
-  providers: [],
-  exports: [TypeOrmModule] // Exportamos para que otros módulos puedan usar el repositorio
+  imports: [TypeOrmModule.forFeature([Holding, Rol])],
+  controllers: [HoldingController],
+  providers: [HoldingService, PermisosGuard],
+  exports: [TypeOrmModule],
 })
 export class HoldingModule {}

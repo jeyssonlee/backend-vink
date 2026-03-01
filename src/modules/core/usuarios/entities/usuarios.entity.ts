@@ -26,21 +26,21 @@ export class Usuario {
   id_rol: string;
 
   // REGLA: Aislamiento Multi-Empresa 
-  @ManyToOne(() => Empresa, (empresa) => empresa.usuarios)
+  @ManyToOne(() => Empresa, (empresa) => empresa.usuarios, { nullable: true })
   @JoinColumn({ name: 'id_empresa' })
-  empresa: Empresa;
+  empresa?: Empresa; // <-- El "?" le dice a TypeScript que es opcional
 
-  @Column({ type: 'uuid' }) 
-  id_empresa: string;
+  @Column({ type: 'uuid', nullable: true }) // <-- "nullable: true" lo hace opcional en Postgres
+  id_empresa?: string;
 
  // SUCURSAL
 
-  @ManyToOne(() => Sucursal)
-  @JoinColumn({ name: 'id_sucursal' })
-  sucursal: Sucursal;
-
-  @Column({ type: 'uuid', nullable: true })
-  id_sucursal: string;
+ @ManyToOne(() => Sucursal, { nullable: true })
+ @JoinColumn({ name: 'id_sucursal' })
+ sucursal?: Sucursal;
+ 
+ @Column({ type: 'uuid', nullable: true })
+ id_sucursal?: string;
 
   @Column({ type: 'boolean', default: true })
   activo: boolean;

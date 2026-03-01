@@ -23,11 +23,14 @@ export class FichaClienteService {
     // 1. Validamos que el cliente exista y pertenezca a la empresa actual
     const cliente = await this.clienteRepo.findOne({
       where: { id_cliente: idCliente, id_empresa: idEmpresa },
+      relations: ['vendedor']
     });
 
     if (!cliente) {
       throw new NotFoundException('El cliente no existe o no pertenece a esta empresa');
     }
+
+    
 
     // 2. Ejecutamos todos los cálculos analíticos en PARALELO para máxima velocidad
     const [
@@ -133,11 +136,14 @@ export class FichaClienteService {
         id_cliente: cliente.id_cliente,
         razon_social: cliente.razon_social,
         rif: cliente.rif,
-        // Usamos Number() por si el motor de BD lo devuelve como string
         limite_credito_monto: Number(cliente.limite_credito_monto || 0),
         estatus: cliente.estatus,
         tipo_precio: cliente.tipo_precio,
-        telefono: cliente.numero_telefonico
+        telefono: cliente.numero_telefonico, // 👈 Ajustado al nombre que lee el frontend
+        direccion_fiscal: cliente.direccion_fiscal,   // 👈 Añadido
+        direccion_entrega: cliente.direccion_entrega, // 👈 Añadido
+        vendedor: cliente.vendedor,                   // 👈 Añadid
+        deuda_total: Number(deudaVivaResult?.deuda_viva || 0),
       },
       kpis: {
         deuda_viva: Number(deudaVivaResult?.deuda_viva || 0),

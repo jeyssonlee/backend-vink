@@ -1,14 +1,15 @@
-import { Controller, Patch, Param } from '@nestjs/common';
-import { SyncService } from './sync.service'; // <--- Import correcto
+import { Controller, Patch, Param, UseGuards } from '@nestjs/common';
+import { SyncService } from './sync.service';
+import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard';
 
-@Controller('sync') // <--- Ruta renombrada
-export class SyncController { // <--- Clase renombrada
-  constructor(private readonly syncService: SyncService) {} // <--- Inyección renombrada
+@Controller('sync')
+@UseGuards(JwtAuthGuard)
+export class SyncController {
+  constructor(private readonly syncService: SyncService) {}
 
   @Patch('anular/:id')
   anular(@Param('id') id: string) {
-    // Nota: aquí pasabas un objeto, asegúrate que anularPedido en service espere eso
-    return this.syncService.anularPedido({ id_pedido_local: id }); 
+    return this.syncService.anularPedido({ id_pedido_local: id });
   }
 
   @Patch('finalizar/:id')

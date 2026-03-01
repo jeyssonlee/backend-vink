@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Usuario } from 'src/modules/core/usuarios/entities/usuarios.entity';
 import * as bcrypt from 'bcrypt';
+import { Rol } from './roles/entities/rol.entity';
 
 @Injectable()
 export class AuthService {
@@ -11,6 +12,7 @@ export class AuthService {
     @InjectRepository(Usuario)
     private usuariosRepo: Repository<Usuario>,
     private jwtService: JwtService,
+    @InjectRepository(Rol) private rolRepository: Repository<Rol>
   ) {}
 
   // 1. Validar Usuario (Login Strategy)
@@ -57,7 +59,15 @@ export class AuthService {
         empresa: user.empresa?.razon_social,
         // 👇 AGREGAMOS EL HOLDING AL OBJETO DE RESPUESTA
         holding: user.empresa?.holding?.nombre || null 
-      }
+      },     
     };
+  }
+  async obtenerPermisosPorRol(nombreRol: string): Promise<string[]> {
+    const rol = await this.rolRepository.findOne({
+      where: { nombre: nombreRol },
+    });
+  
+    if (!rol) return [];
+    return rol.permisos ?? [];
   }
 }

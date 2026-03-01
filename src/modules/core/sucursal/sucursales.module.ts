@@ -1,16 +1,15 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Sucursal } from './entities/sucursal.entity';
-// 👇 Importamos el controlador y el servicio
 import { SucursalesController } from './sucursales.controller';
 import { SucursalesService } from './sucursales.service';
+import { Rol } from 'src/modules/auth/roles/entities/rol.entity';
+import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Sucursal])],
-  // 👇 Registramos el controlador para quitar el Error 404
+  imports: [TypeOrmModule.forFeature([Sucursal, Rol])],
   controllers: [SucursalesController],
-  // 👇 Registramos el servicio para que el controlador pueda usarlo
-  providers: [SucursalesService],
-  exports: [TypeOrmModule, SucursalesService] // Exportamos el servicio por si otro módulo lo necesita
+  providers: [SucursalesService, PermisosGuard],
+  exports: [TypeOrmModule, SucursalesService],
 })
 export class SucursalModule {}

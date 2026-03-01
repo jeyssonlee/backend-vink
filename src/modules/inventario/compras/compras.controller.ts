@@ -1,37 +1,39 @@
 import { Controller, Get, Post, Body, Patch, Param, ParseUUIDPipe, UseGuards, Req, UnauthorizedException } from '@nestjs/common';
 import { ComprasService } from './compras.service';
-import { CrearCompraDto } from './dto/crear-compra.dto'; // Asegúrate que el nombre del archivo sea correcto
-import { AuthGuard } from '@nestjs/passport';
+import { CrearCompraDto } from './dto/crear-compra.dto';
+import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard';
+import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
+import { Permisos } from 'src/modules/auth/decorators/permisos.decorator';
+import { Permiso } from 'src/modules/auth/permisos.enum';
 
 @Controller('compras')
-@UseGuards(AuthGuard('jwt')) // 🔒 Protegemos todas las rutas
+@UseGuards(JwtAuthGuard, PermisosGuard)
 export class ComprasController {
   constructor(private readonly comprasService: ComprasService) {}
 
   @Post()
-  async create(@Body() createCompraDto: CrearCompraDto) {
-    // CORRECCIÓN: Tu servicio usa 'crear' (en español)
-    return await this.comprasService.crear(createCompraDto);
+  @Permisos(Permiso.CREAR_COMPRAS)
+  async create(@Body() dto: CrearCompraDto) {
+    return await this.comprasService.crear(dto);
   }
 
   @Get()
+  @Permisos(Permiso.VER_COMPRAS)
   async findAll() {
     return await this.comprasService.findAll();
   }
 
   @Get(':id')
+  @Permisos(Permiso.VER_COMPRAS)
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return await this.comprasService.findOne(id);
   }
 
-  // ✅ RUTA DE ANULACIÓN ACTUALIZADA
   @Patch(':termino/anular')
+  @Permisos(Permiso.CREAR_COMPRAS)
   async anularCompra(@Param('termino') termino: string, @Req() req) {
-    // 1. Extraemos la empresa del usuario logueado (Security Check)
     const idEmpresa = req.user.id_empresa;
     if (!idEmpresa) throw new UnauthorizedException('Usuario sin empresa asignada');
-
-    // 2. Llamamos al método 'anular' pasando los DOS argumentos que espera
     return await this.comprasService.anular(termino, idEmpresa);
   }
 }

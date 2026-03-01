@@ -6,15 +6,13 @@ import { Almacen } from '../almacenes/entities/almacen.entity';
 import { Precio } from './entities/precio.entity';
 import { ProductosService } from './productos.service';
 import { ProductosController } from './productos.controller';
+import { Rol } from 'src/modules/auth/roles/entities/rol.entity';
+import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 
 @Module({
-  imports: [
-    // Registramos todas las entidades del dominio de productos
-    TypeOrmModule.forFeature([Producto, Inventario, Almacen, Precio])
-  ],
+  imports: [TypeOrmModule.forFeature([Producto, Inventario, Almacen, Precio, Rol])],
   controllers: [ProductosController],
-  providers: [ProductosService],
-  // Exportamos el Service y el TypeOrmModule para que el módulo de Pedidos pueda usarlos
+  providers: [ProductosService, PermisosGuard],
   exports: [ProductosService, TypeOrmModule, ProductosModule],
 })
 export class ProductosModule {}

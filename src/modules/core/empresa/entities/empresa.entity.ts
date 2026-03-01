@@ -30,7 +30,7 @@ export class Empresa {
   usuarios: Usuario[];
 
   // --- RELACIÓN CON HOLDING (NUEVO) ---
-  @ManyToOne(() => Holding, (holding) => holding.empresas, { nullable: true }) // Nullable al principio para no romper datos viejos
+  @ManyToOne(() => Holding, (holding) => holding.empresas, { nullable: true })
   @JoinColumn({ name: 'id_holding' })
   holding: Holding;
 

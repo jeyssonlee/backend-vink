@@ -13,10 +13,16 @@ export enum Permiso {
     CREAR_ROLES = 'crear_roles',
     EDITAR_ROLES = 'editar_roles',
   
-    // PRODUCTOS / INVENTARIO
+    // INVENTARIO
     VER_INVENTARIO = 'ver_inventario',
     EDITAR_INVENTARIO = 'editar_inventario',
     VER_KARDEX = 'ver_kardex',
+
+    //PRODUCTOS
+    VER_PRODUCTOS = "ver_productos",
+    CREAR_PRODUCTOS = "crear_productos",
+    EDITAR_PRODUCTOS = "editar_productos",
+    ELIMINAR_PRODUCTOS = "eliminar_productos",
   
     // COMPRAS
     VER_COMPRAS = 'ver_compras',
@@ -31,6 +37,7 @@ export enum Permiso {
     VER_CLIENTES = 'ver_clientes',
     CREAR_CLIENTES = 'crear_clientes',
     EDITAR_CLIENTES = 'editar_clientes',
+    VER_PERFIL_CLIENTE = "ver_perfil_cliente",
   
     // COBRANZAS
     VER_COBRANZAS = 'ver_cobranzas',
@@ -46,4 +53,21 @@ export enum Permiso {
     // PEDIDOS
     CREAR_PEDIDOS = 'crear_pedidos',
     VER_PEDIDOS = 'ver_pedidos',
+
+    // VENDEDORES
+    VER_VENDEDORES = "ver_vendedores",
+    CREAR_VENDEDORES = "crear_vendedores",
+    EDITAR_VENDEDORES = "editar_vendedores",
+    ELIMINAR_VENDEDORES = "eliminar_vendedores",
+
+    //ALMACENES
+    VER_ALMACENES = "ver_almacenes",
+    EDITAR_ALMACENES = "editar_almacenes",
+
+    //PROVEEDORES
+    VER_PROVEEDORES = "ver_proveedores",
+    CREAR_PROVEEDORES = "crear_proveedores",
+    EDITAR_PROVEEDORES = "editar_proveedores",
+    ELIMINAR_PROVEEDORES = "eliminar_proveedores",
+
   }

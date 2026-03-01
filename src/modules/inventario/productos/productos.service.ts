@@ -104,6 +104,36 @@ export class ProductosService {
     });
   }
 
+  async listarInventarioConsulta(idEmpresa: string) {
+    const productos = await this.productoRepo.find({
+      where: { id_empresa: idEmpresa },
+      relations: ['precios'],
+    });
+  
+    const resultado = await Promise.all(
+      productos.map(async (p) => {
+        const inv = await this.inventarioRepo.findOne({
+          where: { 
+            producto: { id_producto: p.id_producto }, 
+            almacen: { es_venta: true } 
+          },
+        });
+  
+        return {
+          id_producto: p.id_producto,
+          codigo: p.codigo,
+          nombre: p.nombre,
+          marca: p.marca,
+          categoria: p.categoria,
+          precio_venta: p.precios?.find((pr) => pr.nombre_lista === 'VENTA')?.valor ?? null,
+          stock_disponible: inv ? inv.cantidad : 0,
+        };
+      })
+    );
+  
+    return resultado;
+  }
+
   async obtenerStockDisponible(idProducto: string): Promise<number> {
     const inv = await this.inventarioRepo.findOne({
       where: { producto: { id_producto: idProducto }, almacen: { es_venta: true } }
