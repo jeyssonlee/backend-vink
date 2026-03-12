@@ -4,19 +4,15 @@ import { Repository, QueryRunner } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { UpdateProductoDto } from './dto/update-prodcuto.dto';
 import * as XLSX from 'xlsx';
-
-// Entidades
 import { Producto } from './entities/producto.entity';
 import { Inventario } from './entities/inventario.entity';
 import { Precio } from './entities/precio.entity';
-
-// DTOs
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { SyncProductoDto } from 'src/modules/sync/dtos/sync-producto.dto';
-
-// 👇 KARDEX
 import { KardexService } from '../kardex/kardex.service';
 import { TipoMovimiento } from '../kardex/entities/movimiento-kardex.entity';
+import { InventarioValorizadoQueryDto } from './dto/inventario-valorizado-query.dto';
+
 
 @Injectable()
 export class ProductosService {
@@ -92,7 +88,10 @@ export class ProductosService {
       const stockTotal = p.inventarios?.reduce((sum, inv) => sum + Number(inv.cantidad || 0), 0) || 0;
 
       // B. Determinar Precio Real: Buscamos precio de lista 'GENERAL' o usamos el base
-      const precioVenta = p.precios?.find(pr => pr.nombre_lista === 'GENERAL')?.valor || p.precio_base || 0;
+      const precioVenta = p.precios?.find(pr => pr.nombre_lista === 'VENTA')?.valor
+        ?? p.precios?.find(pr => pr.nombre_lista === 'GENERAL')?.valor 
+        ?? p.precio_base 
+        ?? 0;
 
       return {
         ...p,            // Mantenemos todas las propiedades originales (id, nombre, codigo...)
@@ -112,12 +111,32 @@ export class ProductosService {
   
     const resultado = await Promise.all(
       productos.map(async (p) => {
-        const inv = await this.inventarioRepo.findOne({
-          where: { 
-            producto: { id_producto: p.id_producto }, 
-            almacen: { es_venta: true } 
-          },
-        });
+        // QueryBuilder: evita el bug de TypeORM con filtros en relaciones
+        const inv = await this.inventarioRepo
+          .createQueryBuilder('inv')
+          .leftJoinAndSelect('inv.almacen', 'almacen')
+          .where('inv.id_producto = :idProducto', { idProducto: p.id_producto })
+          .andWhere('inv.id_empresa = :idEmpresa', { idEmpresa })
+          .andWhere('almacen.es_venta = :esVenta', { esVenta: true })
+          .getOne();
+
+         
+           
+        let stockDisponible = 0;
+  
+        if (inv) {
+          stockDisponible = Number(inv.cantidad);
+        } else {
+          // Fallback: sumar todos los inventarios del producto
+          const { sum } = await this.inventarioRepo
+            .createQueryBuilder('inv')
+            .select('COALESCE(SUM(inv.cantidad), 0)', 'sum')
+            .where('inv.id_producto = :idProducto', { idProducto: p.id_producto })
+            .andWhere('inv.id_empresa = :idEmpresa', { idEmpresa })
+            .getRawOne();
+  
+          stockDisponible = Number(sum);
+        }
   
         return {
           id_producto: p.id_producto,
@@ -125,20 +144,55 @@ export class ProductosService {
           nombre: p.nombre,
           marca: p.marca,
           categoria: p.categoria,
-          precio_venta: p.precios?.find((pr) => pr.nombre_lista === 'VENTA')?.valor ?? null,
-          stock_disponible: inv ? inv.cantidad : 0,
+          precio_venta:
+            p.precios?.find((pr) => pr.nombre_lista === 'VENTA')?.valor ??
+            p.precios?.find((pr) => pr.nombre_lista === 'GENERAL')?.valor ??
+            p.precio_base ??
+            null,
+          stock_disponible: stockDisponible,
         };
-      })
+      }),
     );
-  
+      
     return resultado;
   }
-
   async obtenerStockDisponible(idProducto: string): Promise<number> {
     const inv = await this.inventarioRepo.findOne({
       where: { producto: { id_producto: idProducto }, almacen: { es_venta: true } }
     });
     return inv ? inv.cantidad : 0;
+  }
+
+  async buscar(idEmpresa: string, q: string, limit = 10) {
+    const termino = `%${q.trim()}%`;
+  
+    const productos = await this.productoRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.precios', 'precios')
+      .leftJoinAndSelect('p.inventarios', 'inv')
+      .leftJoinAndSelect('inv.almacen', 'almacen')
+      .where('p.id_empresa = :idEmpresa', { idEmpresa })
+      .andWhere(
+        '(LOWER(p.nombre) ILIKE LOWER(:q) OR LOWER(p.codigo) ILIKE LOWER(:q) OR LOWER(p.codigo_barras) ILIKE LOWER(:q))',
+        { q: termino },
+      )
+      .take(limit)
+      .getMany();
+  
+    return productos.map(p => ({
+      id_producto: p.id_producto,
+      codigo: p.codigo,
+      nombre: p.nombre,
+      marca: p.marca,
+      categoria: p.categoria,
+      precio_venta:
+        p.precios?.find(pr => pr.nombre_lista === 'VENTA')?.valor ??
+        p.precios?.find(pr => pr.nombre_lista === 'GENERAL')?.valor ??
+        p.precio_base ?? 0,
+      stock_disponible: p.inventarios
+        ?.filter(i => i.almacen?.es_venta)
+        .reduce((sum, i) => sum + Number(i.cantidad || 0), 0) ?? 0,
+    }));
   }
 
   async findOne(id: string) {
@@ -286,6 +340,75 @@ export class ProductosService {
     }
   }
 
+  async getInventarioValorizado(query: InventarioValorizadoQueryDto) {
+    const { id_empresa } = query;
+  
+    const rows = await this.productoRepo
+      .createQueryBuilder('p')
+      // JOIN solo inventarios de la empresa solicitada
+      .leftJoin(
+        'p.inventarios',
+        'inv',
+        'inv.id_empresa = :id_empresa',
+        { id_empresa },
+      )
+      .leftJoin('inv.almacen', 'alm')
+      
+      // Solo productos que tienen al menos un inventario en esta empresa
+      .where('inv.id_empresa = :id_empresa', { id_empresa })
+      .select([
+        'p.id_producto                                         AS id_producto',
+        'p.codigo                                              AS codigo',
+        'p.nombre                                              AS nombre',
+        'p.marca                                               AS marca',
+        'p.categoria                                           AS categoria',
+  
+        // Stock total = disponible + apartado
+        'SUM(inv.cantidad)                                     AS stock_total',
+  
+        // Stock disponible: almacén es_venta = true
+        `SUM(CASE WHEN alm.es_venta = true  THEN inv.cantidad ELSE 0 END)
+                                                               AS stock_disponible`,
+  
+        // Stock apartado: almacén es_venta = false
+        `SUM(CASE WHEN alm.es_venta = false THEN inv.cantidad ELSE 0 END)
+                                                               AS stock_apartado`,
+  
+        // Costo unitario: se toma del almacén de venta (es donde se
+        // registra al recibir compras). Si no existe ese almacén, se
+        // toma del primer inventario disponible como fallback.
+        `MAX(CASE WHEN alm.es_venta = true  THEN inv.costo_unitario END)
+                                                               AS costo_unitario`,
+  
+        // Valor total = stock_total * costo_unitario
+        // Se calcula en SQL para evitar redondeos distintos en JS.
+        `SUM(inv.cantidad) *
+         COALESCE(
+           MAX(CASE WHEN alm.es_venta = true THEN inv.costo_unitario END),
+           MAX(inv.costo_unitario),
+           0
+         )                                                     AS valor_total`,
+      ])
+      .groupBy('p.id_producto, p.codigo, p.nombre, p.marca, p.categoria')
+      .orderBy('p.nombre', 'ASC')
+      .getRawMany();
+  
+    // Castear a números (getRawMany devuelve strings desde PostgreSQL)
+    return rows.map((r) => ({
+      id_producto:      r.id_producto,
+      codigo:           r.codigo,
+      nombre:           r.nombre,
+      marca:            r.marca      ?? null,
+      categoria:        r.categoria  ?? null,
+      stock_total:      Number(r.stock_total      ?? 0),
+      stock_disponible: Number(r.stock_disponible ?? 0),
+      stock_apartado:   Number(r.stock_apartado   ?? 0),
+      costo_unitario:   Number(r.costo_unitario   ?? 0),
+      valor_total:      Number(r.valor_total      ?? 0),
+    }));
+  }
+  
+
   // ======================================================
   // 3. MOVIMIENTOS DE INVENTARIO
   // ======================================================
@@ -404,6 +527,44 @@ export class ProductosService {
       referencia: 'ANULACION-PEDIDO',
       observacion: 'Liberación de stock apartado'
     }, qr); // 👈 Pasamos QR
+  }
+
+  async confirmarVenta(idProducto: string, cantidad: number, idEmpresa: string, qr: QueryRunner) {
+    const almRes = await qr.manager.query(
+      `SELECT id_almacen FROM almacenes WHERE es_venta = false AND id_empresa = $1 LIMIT 1`,
+      [idEmpresa]
+    );
+    if (!almRes.length) throw new BadRequestException('No se encontró almacén de apartados');
+    const idAlmacenApartado = almRes[0].id_almacen;
+  
+    const stockAntRes = await qr.manager.query(
+      `SELECT cantidad, costo_unitario FROM inventarios WHERE id_producto = $1 AND id_almacen = $2`,
+      [idProducto, idAlmacenApartado]
+    );
+    const stockAnt = stockAntRes.length > 0 ? parseFloat(stockAntRes[0].cantidad) : 0;
+    const costo = stockAntRes.length > 0 ? parseFloat(stockAntRes[0].costo_unitario) : 0;
+  
+    // Restar del almacén APARTADO
+    await qr.manager.query(`
+      UPDATE inventarios SET cantidad = cantidad - $1, updated_at = NOW()
+      WHERE id_producto = $2 AND id_almacen = $3
+    `, [cantidad, idProducto, idAlmacenApartado]);
+  
+    // Kardex
+    await this.kardexService.registrar({
+      id_empresa: idEmpresa,
+      id_almacen: idAlmacenApartado,
+      id_producto: idProducto,
+      tipo: TipoMovimiento.VENTA,
+      cantidad: cantidad,
+      costo_unitario: costo,
+      stock_inicial: stockAnt,
+      stock_final: stockAnt - cantidad,
+      referencia: 'FACTURACION',
+      observacion: 'Salida por facturación de pedido',
+    }, qr);
+  
+    return true;
   }
 
   /**
@@ -709,7 +870,7 @@ export class ProductosService {
         producto: { id_producto: idProducto },
         almacen: { es_venta: true } 
       },
-      relations: ['producto']
+      relations: ['producto', 'almacen']
     });
 
     if (!inventario) {

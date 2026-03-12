@@ -35,9 +35,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: payload.email, 
       id_empresa: payload.id_empresa, 
       rol: payload.rol,
-      
-      // 👇 NUEVO: Recuperamos el nombre para usarlo en los Logs
-      username: payload.username || 'Usuario' 
+      username: payload.username || 'Usuario',
+      id_vendedor: payload.id_vendedor ?? null,
     };
   }
 }

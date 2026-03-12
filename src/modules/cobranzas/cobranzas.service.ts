@@ -377,18 +377,36 @@ async aprobarCobranza(id: string, idAprobador: string) {
     });
   }
 
-  async findHistorial(idEmpresa: string) {
-    return this.cobranzaRepo.find({
-      where: { 
-        empresa: { id: idEmpresa } as any,
-        // 🚀 FILTRO CLAVE: Solo lo aprobado
-        estado: EstadoCobranza.APLICADA 
-      },
-      relations: ['cliente', 'vendedor', 'metodos', 'facturas_afectadas'],
-      // 💡 Tip: Ordena por fecha_aprobacion para que el historial sea cronológico de cierre
-      order: { fecha_aprobacion: 'DESC' }, 
-      take: 100
-    });
+  async findHistorial(idEmpresa: string, filters?: { 
+    fecha_inicio?: string; 
+    fecha_fin?: string; 
+    texto?: string; 
+  }) {
+    const qb = this.dataSource.getRepository(Cobranza)
+      .createQueryBuilder('c')
+      .leftJoinAndSelect('c.cliente', 'cli')
+      .leftJoinAndSelect('c.vendedor', 'ven')
+      .leftJoinAndSelect('c.metodos', 'met')
+      .leftJoinAndSelect('c.facturas_afectadas', 'cf')
+      .where('c.id_empresa = :idEmpresa', { idEmpresa })
+      .andWhere('c.estado = :estado', { estado: EstadoCobranza.APLICADA })
+      .orderBy('c.fecha_aprobacion', 'DESC')
+      .take(200);
+  
+    if (filters?.fecha_inicio) {
+      qb.andWhere('c.fecha_aprobacion >= :fi', { fi: filters.fecha_inicio });
+    }
+    if (filters?.fecha_fin) {
+      qb.andWhere('c.fecha_aprobacion <= :ff', { ff: filters.fecha_fin + 'T23:59:59' });
+    }
+    if (filters?.texto) {
+      qb.andWhere(
+        '(cli.razon_social ILIKE :texto OR c.consecutivo ILIKE :texto OR ven.nombre_apellido ILIKE :texto)',
+        { texto: `%${filters.texto}%` }
+      );
+    }
+  
+    return qb.getMany();
   }
 
   async findHistorialByVendedor(idVendedor: string) {

@@ -38,7 +38,7 @@ export class SemillaService {
     }
 
     try {
-      // 1. ROLES
+      // ── 1. ROLES ────────────────────────────────────────────────────────────
       this.logger.log('➡️ PASO 1: Creando Roles...');
 
       const rolesData = [
@@ -50,47 +50,119 @@ export class SemillaService {
         {
           nombre: 'SUPER_ADMIN',
           descripcion: 'Dueño de empresa o holding',
-          permisos: Object.values(Permiso).filter(p => p !== Permiso.EDITAR_EMPRESA),
+          permisos: Object.values(Permiso).filter(
+            p => p !== Permiso.EDITAR_EMPRESA && p !== Permiso.EDITAR_TASA_BCV),
+        },
+        {
+          nombre: 'VENTAS',
+          descripcion: 'Gestión de ventas, pedidos, clientes e inventario',
+          permisos: [
+            // Ventas
+            Permiso.VER_VENTAS,
+            Permiso.CREAR_VENTAS,
+            Permiso.VER_REPORTES_VENTAS,
+            // Pedidos — ciclo completo de revisión y facturación
+            Permiso.VER_PEDIDOS,
+            Permiso.CREAR_PEDIDOS,
+            Permiso.EDITAR_PEDIDOS,
+            Permiso.REVISAR_PEDIDOS,
+            Permiso.FACTURAR_PEDIDOS,
+            // Clientes
+            Permiso.VER_CLIENTES,
+            Permiso.CREAR_CLIENTES,
+            Permiso.EDITAR_CLIENTES,
+            Permiso.VER_PERFIL_CLIENTE,
+            // Inventario y productos
+            Permiso.VER_INVENTARIO,
+            Permiso.VER_PRODUCTOS,
+            Permiso.VER_KARDEX,
+            Permiso.VER_INVENTARIO_VALORIZADO,
+            // Compras y proveedores
+            Permiso.VER_COMPRAS,
+            Permiso.CREAR_COMPRAS,
+            Permiso.VER_PROVEEDORES,
+            Permiso.VER_REPORTES_COMPRAS,
+            // Almacenes
+            Permiso.VER_ALMACENES,
+            // Vendedores
+            Permiso.VER_VENDEDORES,
+            // CXC
+            Permiso.VER_CXC,
+          ],
         },
         {
           nombre: 'COBRANZAS',
           descripcion: 'Gestión de cobranzas y cuentas por cobrar',
           permisos: [
-            Permiso.VER_VENTAS, Permiso.VER_CLIENTES,
-            Permiso.VER_COBRANZAS, Permiso.APROBAR_COBRANZAS,
-            Permiso.RECHAZAR_COBRANZAS, Permiso.VER_CXC,
-          ],
-        },
-        {
-          nombre: 'VENTAS',
-          descripcion: 'Compras, ventas, inventario y CXC',
-          permisos: [
-            Permiso.VER_VENTAS, Permiso.CREAR_VENTAS,
-            Permiso.VER_CLIENTES, Permiso.CREAR_CLIENTES, Permiso.EDITAR_CLIENTES,
-            Permiso.VER_INVENTARIO, Permiso.VER_COMPRAS, Permiso.CREAR_COMPRAS,
+            Permiso.VER_VENTAS,
+            Permiso.VER_CLIENTES,
+            Permiso.VER_PERFIL_CLIENTE,
+            Permiso.VER_COBRANZAS,
+            Permiso.APROBAR_COBRANZAS,
+            Permiso.RECHAZAR_COBRANZAS,
             Permiso.VER_CXC,
           ],
         },
         {
           nombre: 'GERENCIA',
-          descripcion: 'Ventas, inventarios y reportes',
+          descripcion: 'Ventas, inventarios y reportes — solo lectura',
           permisos: [
-            Permiso.VER_VENTAS, Permiso.VER_INVENTARIO,
-            Permiso.VER_CXC, Permiso.VER_REPORTES, Permiso.VER_CLIENTES,
+            Permiso.VER_VENTAS,
+            Permiso.VER_PEDIDOS,
+            Permiso.VER_CLIENTES,
+            Permiso.VER_PERFIL_CLIENTE,
+            Permiso.VER_INVENTARIO,
+            Permiso.VER_PRODUCTOS,
+            Permiso.VER_KARDEX,
+            Permiso.VER_CXC,
+            Permiso.VER_COBRANZAS,
+            Permiso.VER_PROVEEDORES,
+            Permiso.VER_ALMACENES,
+            Permiso.VER_VENDEDORES,
           ],
         },
         {
           nombre: 'ALMACEN',
-          descripcion: 'Solo consulta de inventario',
-          permisos: [Permiso.VER_INVENTARIO, Permiso.VER_KARDEX],
+          descripcion: 'Consulta y gestión de inventario y almacenes',
+          permisos: [
+            Permiso.VER_INVENTARIO,
+            Permiso.EDITAR_INVENTARIO,
+            Permiso.VER_KARDEX,
+            Permiso.VER_ALMACENES,
+            Permiso.EDITAR_ALMACENES,
+            Permiso.VER_PRODUCTOS,
+          ],
         },
         {
           nombre: 'VENDEDOR',
-          descripcion: 'Vendedor de campo - acceso desde app móvil',
+          descripcion: 'Vendedor de campo — web y app móvil',
           permisos: [
-            Permiso.VER_CLIENTES, Permiso.VER_VENTAS,
-            Permiso.VER_CXC, Permiso.VER_COBRANZAS,
-            Permiso.CREAR_PEDIDOS, Permiso.VER_PEDIDOS,
+            // Pedidos — crear y enviar (no revisar ni facturar)
+            Permiso.VER_PEDIDOS,
+            Permiso.CREAR_PEDIDOS,
+            // Clientes — solo cartera básica, sin perfil 360
+            Permiso.VER_CLIENTES,
+            // Cobranza — solo ver y registrar
+            Permiso.VER_COBRANZAS,
+            // Inventario — solo consulta de stock disponible
+            Permiso.VER_INVENTARIO,
+            // CXC — para ver saldos del cliente
+            Permiso.VER_CXC,
+          ],
+        },
+        {
+          nombre: 'SUPERVISOR DE VENTAS',
+          descripcion: 'Supervisión de vendedores, pedidos y clientes',
+          permisos: [
+            Permiso.VER_VENTAS,
+            Permiso.VER_PEDIDOS,
+            Permiso.REVISAR_PEDIDOS,
+            Permiso.VER_CLIENTES,
+            Permiso.VER_PERFIL_CLIENTE,
+            Permiso.VER_VENDEDORES,
+            Permiso.VER_INVENTARIO,
+            Permiso.VER_CXC,
+            Permiso.VER_COBRANZAS,
           ],
         },
       ];
@@ -102,7 +174,7 @@ export class SemillaService {
       }
       this.logger.log(`✅ ${rolesData.length} roles creados.`);
 
-      // 2. USUARIO ROOT (sin empresa ni sucursal)
+      // ── 2. USUARIO ROOT ──────────────────────────────────────────────────────
       this.logger.log('➡️ PASO 2: Creando Usuario ROOT...');
       const passwordHash = await bcrypt.hash('123456', 10);
 
@@ -119,7 +191,7 @@ export class SemillaService {
       return {
         success: true,
         message: 'SEMILLA EJECUTADA CORRECTAMENTE 🏁',
-        credenciales: { user: 'admin@erp.com', pass: '123456' }
+        credenciales: { user: 'admin@erp.com', pass: '123456' },
       };
 
     } catch (error) {

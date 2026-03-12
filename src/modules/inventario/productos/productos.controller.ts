@@ -7,6 +7,7 @@ import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard';
 import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 import { Permisos } from 'src/modules/auth/decorators/permisos.decorator';
 import { Permiso } from 'src/modules/auth/permisos.enum';
+import { InventarioValorizadoQueryDto } from './dto/inventario-valorizado-query.dto';
 
 @Controller('productos')
 @UseGuards(JwtAuthGuard, PermisosGuard)
@@ -44,10 +45,39 @@ export class ProductosController {
     return await this.productosService.listarTodos(idEmpresa || req.user.id_empresa);
   }
 
+  @Get('inventario-valorizado')
+  @UseGuards(JwtAuthGuard)                       // o el guard que uses en el módulo
+  async getInventarioValorizado(
+  @Query() query: InventarioValorizadoQueryDto,) {
+  return this.productosService.getInventarioValorizado(query);
+  }
+
+  @Get('inventario-consulta')
+  @Permisos(Permiso.VER_INVENTARIO)
+  async listarInventarioConsulta(@Query('id_empresa') idEmpresa: string, @Req() req) {
+  return await this.productosService.listarInventarioConsulta(idEmpresa || req.user.id_empresa);
+  }
+
   @Patch(':id')
   @Permisos(Permiso.EDITAR_PRODUCTOS)
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductoDto) {
     return await this.productosService.update(id, dto);
+  }
+
+  @Get('buscar')
+  @Permisos(Permiso.VER_PRODUCTOS)
+  async buscar(
+  @Query('id_empresa') idEmpresa: string,
+  @Query('q') q: string,
+  @Query('limit') limit?: string,
+  @Req() req?,
+  ) {
+  if (!q || q.trim().length < 2) return [];
+  return await this.productosService.buscar(
+    idEmpresa || req.user.id_empresa,
+    q,
+    limit ? parseInt(limit) : 10,
+  );
   }
 
   @Delete(':id')
@@ -55,14 +85,6 @@ export class ProductosController {
   async remove(@Param('id', ParseUUIDPipe) id: string) {
     return await this.productosService.remove(id);
   }
-
-  // ── Consulta de inventario (vendedores y roles operativos) ─────────────────
-
-  @Get('inventario-consulta')
-  @Permisos(Permiso.VER_INVENTARIO)
-  async listarInventarioConsulta(@Query('id_empresa') idEmpresa: string, @Req() req) {
-  return await this.productosService.listarInventarioConsulta(idEmpresa || req.user.id_empresa);
-}
 
   @Get(':id/stock')
   @Permisos(Permiso.VER_INVENTARIO) // ← El vendedor puede ver stock disponible

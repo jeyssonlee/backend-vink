@@ -5,9 +5,13 @@ import { EmpresasService } from './empresas.service';
 import { EmpresasController } from './empresas.controller';
 import { Rol } from 'src/modules/auth/roles/entities/rol.entity';
 import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
+import { ConfiguracionImpuestosModule } from '../configuracion-impuestos/configuracion-impuestos.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Empresa, Rol])],
+  imports: [TypeOrmModule.forFeature([Empresa, Rol]),
+  ConfiguracionImpuestosModule,
+  ],
+  
   controllers: [EmpresasController],
   providers: [EmpresasService, PermisosGuard],
   exports: [EmpresasService, TypeOrmModule],

@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { Usuario } from 'src/modules/core/usuarios/entities/usuarios.entity';
 import * as bcrypt from 'bcrypt';
 import { Rol } from './roles/entities/rol.entity';
+import { Vendedor } from 'src/modules/ventas/vendedores/entities/vendedor.entity';
 
 @Injectable()
 export class AuthService {
@@ -12,7 +13,8 @@ export class AuthService {
     @InjectRepository(Usuario)
     private usuariosRepo: Repository<Usuario>,
     private jwtService: JwtService,
-    @InjectRepository(Rol) private rolRepository: Repository<Rol>
+    @InjectRepository(Rol) private rolRepository: Repository<Rol>,
+    @InjectRepository(Vendedor) private vendedorRepository: Repository<Vendedor>,
   ) {}
 
   // 1. Validar Usuario (Login Strategy)
@@ -37,13 +39,22 @@ export class AuthService {
 
   // 2. Generar Token (JWT)
   async login(user: any) {
+    // Buscar si este usuario tiene un registro de vendedor asociado
+    const vendedor = await this.vendedorRepository.findOne({
+      where: { id_usuario: user.id },
+    });
+
+    console.log('🔍 user.id:', user.id);
+  console.log('🔍 vendedor encontrado:', vendedor?.id_vendedor ?? 'NULL');
+
     const payload = { 
       sub: user.id, 
       email: user.correo, 
       username: user.nombre_completo || user.correo, 
       rol: user.rol?.nombre,                   
       sucursalId: user.sucursal?.id_sucursal,  
-      id_empresa: user.empresa?.id || user.id_empresa
+      id_empresa: user.empresa?.id || user.id_empresa,
+      id_vendedor: vendedor?.id_vendedor ?? null,
     };
     
     return {
@@ -55,10 +66,9 @@ export class AuthService {
         email: user.correo,
         rol: user.rol?.nombre,
         sucursal: user.sucursal?.nombre,
-        // 👇 AQUÍ LA EMPRESA YA VIENE COMO STRING (Razon Social)
         empresa: user.empresa?.razon_social,
-        // 👇 AGREGAMOS EL HOLDING AL OBJETO DE RESPUESTA
-        holding: user.empresa?.holding?.nombre || null 
+        holding: user.empresa?.holding?.nombre || null,
+        id_vendedor: vendedor?.id_vendedor ?? null,
       },     
     };
   }

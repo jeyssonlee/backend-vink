@@ -1,39 +1,62 @@
-import { IsString, IsNumber, IsArray, ValidateNested, IsOptional, IsUUID, Min, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsArray, ValidateNested, IsNumber, IsPositive, IsInt, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class PedidoDetalleDto {
-  @IsUUID('4')
-  @IsNotEmpty()
+export class DetallePedidoDto {
+  @IsUUID()
   id_producto: string;
 
-  @IsNumber()
-  @Min(1)
+  @IsInt()
+  @IsPositive()
   cantidad: number;
 
   @IsNumber()
-  @Min(0)
+  @IsPositive()
   precio_unitario: number;
 }
 
 export class CreatePedidoDto {
-  @IsString()
   @IsOptional()
-  id_pedido_local?: string; // Opcional porque si viene de la Web, no trae ID local
+  @IsString()
+  id_pedido_local?: string;
 
-  @IsUUID('4')
-  @IsNotEmpty()
+  // Seteado desde el token en el controller
+  @IsOptional()
+  @IsUUID()
+  id_empresa?: string;
+
+  @IsOptional()
+  @IsUUID()
+  id_vendedor?: string;
+
+  @IsUUID()
   id_cliente: string;
 
-  @IsUUID('4')
-  @IsNotEmpty() // Necesitamos saber quién vendió
-  id_vendedor: string;
+  @IsOptional()
+  @IsString()
+  nota?: string;
 
-  @IsUUID('4')
-  @IsNotEmpty()
-  id_empresa: string;
+  @IsOptional()
+  @IsString()
+  metodo_pago?: string; // Default: 'CREDITO'
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dias_credito?: number; // Default: 15
 
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => PedidoDetalleDto)
-  detalles: PedidoDetalleDto[];
+  @Type(() => DetallePedidoDto)
+  detalles: DetallePedidoDto[];
+}
+
+export class RechazarPedidoDto {
+  @IsString()
+  nota_rechazo: string;
+}
+
+export class FacturarLoteDto {
+  @IsArray()
+  @IsUUID('all', { each: true })
+  ids_pedidos: string[];
 }

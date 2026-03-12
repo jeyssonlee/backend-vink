@@ -29,7 +29,16 @@ import { MonitorDolarModule } from './modules/utilidades/monitor-dolar/monitor-d
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { EstadisticasModule } from './modules/estadisticas/estadisticas.module';
 import { OnboardingModule } from './modules/core/onboarding/onboarding.module';
-
+import { CuentasPagarModule } from './modules/cuentas-pagar/cuentas-pagar.module';
+import { ConfiguracionImpuestosModule } from './modules/core/configuracion-impuestos/configuracion-impuestos.module';
+import { SchemaProvisioningModule } from './modules/banco/schema-provisioning/schema-provisioning.module';
+import { TasaBcvModule } from './modules/banco/tasa-bcv/tasa-bcv.module';
+import { CuentasBancariasModule } from './modules/banco/cuentas-bancarias/cuentas-bancarias.module';
+import { CategoriasModule } from './modules/banco/categorias/categorias.module';
+import { ImportacionModule } from './modules/banco/importacion/importacion.module';
+import { MovimientosModule } from './modules/banco/movimientos/movimientos.module';
+import { DashboardBancoModule } from './modules/banco/dashboard-banco/dashboard-banco.module';
+import { ReportesBancoModule } from './modules/banco/reportes-banco/reportes-banco.module';
 
 @Module({
   imports: [
@@ -87,7 +96,17 @@ import { OnboardingModule } from './modules/core/onboarding/onboarding.module';
     MonitorDolarModule,
     DashboardModule,
     EstadisticasModule,
-    OnboardingModule 
+    OnboardingModule,
+    CuentasPagarModule,
+    ConfiguracionImpuestosModule,
+    SchemaProvisioningModule,
+    TasaBcvModule,
+    CuentasBancariasModule,
+    CategoriasModule,
+    ImportacionModule,
+    MovimientosModule,
+    DashboardBancoModule,
+    ReportesBancoModule
      ],
 })
 export class AppModule {}

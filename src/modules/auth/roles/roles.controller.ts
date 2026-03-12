@@ -4,6 +4,7 @@ import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard';
 import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 import { Permisos } from 'src/modules/auth/decorators/permisos.decorator';
 import { Permiso } from 'src/modules/auth/permisos.enum';
+import { Delete } from '@nestjs/common';
 
 @Controller('roles')
 @UseGuards(JwtAuthGuard, PermisosGuard)
@@ -33,4 +34,10 @@ export class RolesController {
   crear(@Body() body: { nombre: string; descripcion: string; permisos: string[] }) {
     return this.rolesService.crear(body);
   }
+
+  @Delete(':id')
+  @Permisos(Permiso.ELIMINAR_ROLES)
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+  return this.rolesService.remove(id);
+}
 }

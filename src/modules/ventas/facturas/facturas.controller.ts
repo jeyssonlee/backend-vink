@@ -6,6 +6,8 @@ import { JwtAuthGuard } from 'src/modules/auth/jwt-auth.guard';
 import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
 import { Permisos } from 'src/modules/auth/decorators/permisos.decorator';
 import { Permiso } from 'src/modules/auth/permisos.enum';
+import { AgingQueryDto } from './dto/aging-query.dto';
+import { ReporteVentasQueryDto } from './dto/reporte-ventas-query.dto';
 
 @Controller('facturas')
 @UseGuards(JwtAuthGuard, PermisosGuard)
@@ -24,6 +26,18 @@ export class FacturasController {
     return await this.facturasService.crearLote(dto, req.user.id_empresa, req.user.id_usuario);
   }
 
+  @Get('aging')
+  @UseGuards(JwtAuthGuard)
+  async getAging(@Query() query: AgingQueryDto) {
+  return this.facturasService.getAging(query);
+  }
+
+  @Get('reporte-ventas')
+  @UseGuards(JwtAuthGuard)
+  async getReporteVentas(@Query() query: ReporteVentasQueryDto) {
+  return this.facturasService.getReporteVentas(query);
+  }
+
   @Patch(':id/confirmar')
   @Permisos(Permiso.CREAR_VENTAS)
   async confirmarBorrador(@Param('id', ParseUUIDPipe) id: string, @Req() req: any) {
@@ -38,9 +52,13 @@ export class FacturasController {
 
   @Get()
   @Permisos(Permiso.VER_VENTAS)
-  findAll(@Query('id_empresa') idEmpresa: string, @Query('id_cliente') idCliente?: string) {
-    return this.facturasService.findAll(idEmpresa, idCliente);
-  }
+  findAll(
+  @Query('id_empresa') idEmpresa: string,
+  @Query('id_cliente') idCliente?: string,
+  @Query('solo_pendientes') soloPendientes?: string,
+) {
+  return this.facturasService.findAll(idEmpresa, idCliente, soloPendientes === 'true');
+}
 
   @Get(':id')
   @Permisos(Permiso.VER_VENTAS)

@@ -8,12 +8,15 @@ import { ProductosModule } from 'src/modules/inventario/productos/productos.modu
 import { PedidosModule } from '../pedidos/pedidos.module';
 import { Rol } from 'src/modules/auth/roles/entities/rol.entity';
 import { PermisosGuard } from 'src/modules/auth/guards/permisos.guard';
+import { ConfiguracionImpuestosModule } from 'src/modules/core/configuracion-impuestos/configuracion-impuestos.module';
+
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Factura, FacturaDetalle, Rol]),
     ProductosModule,
     PedidosModule,
+    ConfiguracionImpuestosModule
   ],
   controllers: [FacturasController],
   providers: [FacturasService, PermisosGuard],

@@ -49,4 +49,7 @@ export class Vendedor {
 
   @UpdateDateColumn()
   updated_at: Date;
+
+  @Column({ type: 'uuid', nullable: true })
+  id_usuario: string;
 }

@@ -9,6 +9,7 @@ import { Usuario } from '../usuarios/entities/usuarios.entity';
 import { Rol } from '../../auth/roles/entities/rol.entity';
 import { Almacen } from '../../inventario/almacenes/entities/almacen.entity';
 import { OnboardingEmpresaDto, OnboardingHoldingDto } from './dto/onboarding.dto';
+import { SchemaProvisioningService } from 'src/modules/banco/schema-provisioning/schema-provisioning.service';
 
 @Injectable()
 export class OnboardingService {
@@ -16,6 +17,7 @@ export class OnboardingService {
     @InjectRepository(Rol)
     private readonly rolRepo: Repository<Rol>,
     private readonly dataSource: DataSource,
+    private readonly schemaProvisioning: SchemaProvisioningService, // ← nuevo
   ) {}
 
   async crearEmpresaSimple(dto: OnboardingEmpresaDto) {
@@ -36,7 +38,7 @@ export class OnboardingService {
 
       // 2. Crear sucursales
       for (let i = 0; i < dto.empresa.sucursales.length; i++) {
-        const s = dto.empresa.sucursales[i]
+        const s = dto.empresa.sucursales[i];
         const sucursal = queryRunner.manager.create(Sucursal, {
           nombre: s.nombre,
           direccion: s.direccion,
@@ -45,12 +47,12 @@ export class OnboardingService {
           empresa: empresaGuardada,
         });
         const sucursalGuardada = await queryRunner.manager.save(sucursal);
-      
-        // 3. Almacenes de la sucursal
-        const almacenesACrear = s.almacenes && s.almacenes.length > 0
-          ? s.almacenes
-          : [{ nombre: 'ALMACÉN GENERAL', es_venta: true }]; // default si no se definieron
-      
+
+        const almacenesACrear =
+          s.almacenes && s.almacenes.length > 0
+            ? s.almacenes
+            : [{ nombre: 'ALMACÉN GENERAL', es_venta: true }];
+
         for (const a of almacenesACrear) {
           const almacen = queryRunner.manager.create(Almacen, {
             nombre: a.nombre,
@@ -62,8 +64,17 @@ export class OnboardingService {
         }
       }
 
-      // 4. Crear usuario SUPER_ADMIN
+      // 3. Crear usuario SUPER_ADMIN
       await this.crearAdminUsuario(queryRunner, dto.admin, empresaGuardada);
+
+      // 4. Provisionar schema del tenant ← nuevo
+      //    Se ejecuta ANTES del commit, dentro de la misma transacción.
+      //    Si falla, todo (empresa + sucursales + usuario + schema) hace rollback.
+      await this.schemaProvisioning.provisionTenant(
+        queryRunner,
+        'empresa',
+        empresaGuardada.id,
+      );
 
       await queryRunner.commitTransaction();
 
@@ -71,9 +82,9 @@ export class OnboardingService {
         success: true,
         mensaje: `Empresa ${empresaGuardada.razon_social} creada correctamente`,
         id_empresa: empresaGuardada.id,
-        credenciales: { correo: dto.admin.correo }
+        schema_tenant: SchemaProvisioningService.schemaName('empresa', empresaGuardada.id),
+        credenciales: { correo: dto.admin.correo },
       };
-
     } catch (error) {
       await queryRunner.rollbackTransaction();
       if (error.code === '23505') {
@@ -124,12 +135,12 @@ export class OnboardingService {
             empresa: empresaGuardada,
           });
           const sucursalGuardada = await queryRunner.manager.save(sucursal);
-        
-          // Almacenes de la sucursal
-          const almacenesACrear = s.almacenes && s.almacenes.length > 0
-            ? s.almacenes
-            : [{ nombre: 'ALMACÉN GENERAL', es_venta: true }]; // default si no se definieron
-        
+
+          const almacenesACrear =
+            s.almacenes && s.almacenes.length > 0
+              ? s.almacenes
+              : [{ nombre: 'ALMACÉN GENERAL', es_venta: true }];
+
           for (const a of almacenesACrear) {
             const almacen = queryRunner.manager.create(Almacen, {
               nombre: a.nombre,
@@ -142,8 +153,17 @@ export class OnboardingService {
         }
       }
 
-      // 3. Crear usuario SUPER_ADMIN ligado a la primera empresa
+      // 3. Crear usuario SUPER_ADMIN
       await this.crearAdminUsuario(queryRunner, dto.admin, primeraEmpresa!);
+
+      // 4. Provisionar UN schema para el holding completo ← nuevo
+      //    Un holding = un schema compartido por todas sus empresas.
+      //    Cada empresa tiene su id_empresa en las tablas para filtrar.
+      await this.schemaProvisioning.provisionTenant(
+        queryRunner,
+        'holding',
+        holdingGuardado.id_holding,
+      );
 
       await queryRunner.commitTransaction();
 
@@ -151,9 +171,9 @@ export class OnboardingService {
         success: true,
         mensaje: `Holding ${holdingGuardado.nombre} creado con ${dto.empresas.length} empresa(s)`,
         id_holding: holdingGuardado.id_holding,
-        credenciales: { correo: dto.admin.correo }
+        schema_tenant: SchemaProvisioningService.schemaName('holding', holdingGuardado.id_holding),
+        credenciales: { correo: dto.admin.correo },
       };
-
     } catch (error) {
       await queryRunner.rollbackTransaction();
       if (error.code === '23505') {
@@ -165,9 +185,16 @@ export class OnboardingService {
     }
   }
 
-  private async crearAdminUsuario(queryRunner: any, adminDto: any, empresa: Empresa) {
+  private async crearAdminUsuario(
+    queryRunner: any,
+    adminDto: any,
+    empresa: Empresa,
+  ) {
     const rol = await this.rolRepo.findOne({ where: { nombre: 'SUPER_ADMIN' } });
-    if (!rol) throw new BadRequestException('Rol SUPER_ADMIN no encontrado. Ejecuta la semilla primero.');
+    if (!rol)
+      throw new BadRequestException(
+        'Rol SUPER_ADMIN no encontrado. Ejecuta la semilla primero.',
+      );
 
     const claveHash = await bcrypt.hash(adminDto.clave, 10);
 

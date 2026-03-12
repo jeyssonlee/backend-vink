@@ -12,7 +12,7 @@ export class Rol {
   @Column({ nullable: true })
   descripcion: string;
 
-  // Permisos simples: ['crear_pedido', 'ver_reportes']
+  // Permisos simples: ['ver_ventas', 'crear_ventas', 'ver_reportes_ventas', ...]
   @Column('text', { array: true, default: [] })
   permisos: string[];
 

@@ -2,18 +2,21 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Empresa } from './entities/empresa.entity';
-// Importa tus DTOs si los tienes, o usa Partial<Empresa> temporalmente
+import { ConfiguracionImpuestosService } from '../configuracion-impuestos/configuracion-impuestos.service';
 
 @Injectable()
 export class EmpresasService {
   constructor(
     @InjectRepository(Empresa)
     private readonly empresaRepo: Repository<Empresa>,
+    private readonly impuestosService: ConfiguracionImpuestosService, // ← agregar
   ) {}
 
   async create(data: Partial<Empresa>) {
     const nueva = this.empresaRepo.create(data);
-    return await this.empresaRepo.save(nueva);
+    const saved = await this.empresaRepo.save(nueva);
+    await this.impuestosService.seedEmpresa(saved.id); // ← agregar
+    return saved;
   }
 
   async findAll() {

@@ -30,4 +30,10 @@ export class RolesService {
     const nuevo = this.rolRepo.create(data);
     return this.rolRepo.save(nuevo);
   }
+
+  async remove(id: string) {
+    const rol = await this.findOne(id);
+    await this.rolRepo.remove(rol);
+    return { message: 'Rol eliminado correctamente' };
+  }
 }

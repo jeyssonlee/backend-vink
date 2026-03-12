@@ -97,9 +97,14 @@ export class CobranzasController {
   }
 
   @Get('historial')
-  async historial(@Query('id_empresa') idEmpresa: string) {
-    return this.cobranzasService.findHistorial(idEmpresa);
-  }
+async historial(
+  @Query('id_empresa') idEmpresa: string,
+  @Query('fecha_inicio') fecha_inicio?: string,
+  @Query('fecha_fin') fecha_fin?: string,
+  @Query('texto') texto?: string,
+) {
+  return this.cobranzasService.findHistorial(idEmpresa, { fecha_inicio, fecha_fin, texto });
+}
 
   @Post('manual')
   async createManual(@Body() createCobranzaDto: any) {

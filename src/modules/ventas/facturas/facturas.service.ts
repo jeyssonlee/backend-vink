@@ -9,6 +9,11 @@ import { ProductosService } from 'src/modules/inventario/productos/productos.ser
 import { Cliente } from '../clientes/entities/clientes.entity';
 import { Producto } from 'src/modules/inventario/productos/entities/producto.entity';
 import { Almacen } from 'src/modules/inventario/almacenes/entities/almacen.entity';
+import { AgingQueryDto } from './dto/aging-query.dto';
+import { ReporteVentasQueryDto } from './dto/reporte-ventas-query.dto';
+import { ConfiguracionImpuestosService } from 'src/modules/core/configuracion-impuestos/configuracion-impuestos.service';
+
+
 
 @Injectable()
 export class FacturasService {
@@ -16,7 +21,8 @@ export class FacturasService {
 
   constructor(
     private readonly dataSource: DataSource,
-    private readonly productosService: ProductosService, 
+    private readonly productosService: ProductosService,
+    private readonly impuestosService: ConfiguracionImpuestosService,
   ) {}
 
   // ==========================================================
@@ -127,7 +133,8 @@ export class FacturasService {
       // Totales
       const descuentoGlobal = dto.descuento_global_monto || 0;
       const baseImponible = subtotalBase - descuentoGlobal;
-      const montoIva = baseImponible * 0.16;
+      const tasaIva = await this.impuestosService.getIva(dto.id_empresa!);
+      const montoIva = baseImponible * tasaIva;
       const totalPagar = baseImponible + montoIva;
 
       // Numeración
@@ -393,7 +400,7 @@ export class FacturasService {
   // ==========================================================
   // 5. LISTAR Y BUSCAR
   // ==========================================================
-  async findAll(idEmpresa: string, idCliente?: string) {
+  async findAll(idEmpresa: string, idCliente?: string, soloPendientes?: boolean) {
     const opcionesBusqueda: any = {
       where: { empresa: { id: idEmpresa } },
       order: { fecha_emision: 'DESC' },
@@ -404,12 +411,199 @@ export class FacturasService {
       opcionesBusqueda.where.cliente = { id_cliente: idCliente };
     }
   
+    if (soloPendientes) {
+      opcionesBusqueda.where.estado = EstadoFactura.PENDIENTE;
+    }
+  
     try {
       return await this.dataSource.getRepository(Factura).find(opcionesBusqueda);
     } catch (error) {
       this.logger.error(`Error buscando facturas: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  async getAging(query: AgingQueryDto) {
+    const { id_empresa, vendedor } = query;
+  
+    const qb = this.dataSource.getRepository(Factura)
+      .createQueryBuilder('f')
+      .innerJoin('f.cliente', 'cli')
+      .leftJoin('f.vendedor', 'ven')
+      .where('f.id_empresa = :id_empresa', { id_empresa })
+      .andWhere('f.estado != :anulada',    { anulada: 'ANULADA' })
+      .andWhere('f.saldo_pendiente > 0.01')
+      .select([
+        'f.id_factura                                         AS id_factura',
+        'f.serie                                              AS serie',
+        'f.numero_consecutivo                                 AS numero_consecutivo',
+        'cli.razon_social                                     AS cliente_razon_social',
+        'cli.rif                                              AS cliente_rif',
+        'ven.nombre_apellido                                  AS vendedor',
+        'f.fecha_emision                                      AS fecha_emision',
+        'f.fecha_vencimiento                                  AS fecha_vencimiento',
+        'f.total_pagar                                        AS total_pagar',
+        'f.saldo_pendiente                                    AS saldo_pendiente',
+  
+        // Días vencidos (negativo = aún no vence)
+        `GREATEST(0, CURRENT_DATE - f.fecha_vencimiento::date)
+                                                              AS dias_vencidos`,
+  
+        // Clasificación aging por tramos
+        `CASE WHEN CURRENT_DATE <= f.fecha_vencimiento::date
+              THEN f.saldo_pendiente ELSE 0 END               AS no_vencido`,
+  
+        `CASE WHEN CURRENT_DATE - f.fecha_vencimiento::date BETWEEN 1  AND 30
+              THEN f.saldo_pendiente ELSE 0 END               AS d0_30`,
+  
+        `CASE WHEN CURRENT_DATE - f.fecha_vencimiento::date BETWEEN 31 AND 60
+              THEN f.saldo_pendiente ELSE 0 END               AS d30_60`,
+  
+        `CASE WHEN CURRENT_DATE - f.fecha_vencimiento::date BETWEEN 61 AND 90
+              THEN f.saldo_pendiente ELSE 0 END               AS d60_90`,
+  
+        `CASE WHEN CURRENT_DATE - f.fecha_vencimiento::date > 90
+              THEN f.saldo_pendiente ELSE 0 END               AS d_mas_90`,
+      ]);
+  
+    // Filtro opcional por vendedor
+    if (vendedor) {
+      qb.andWhere('f.id_vendedor = :vendedor', { vendedor });
+    }
+  
+    const rows = await qb.getRawMany();
+  
+    // Castear + construir KPIs en el service (no en el frontend)
+    const facturas = rows.map((r) => ({
+      id_factura:          r.id_factura,
+      serie:               r.serie,
+      numero_consecutivo:  Number(r.numero_consecutivo),
+      cliente: {
+        razon_social:      r.cliente_razon_social,
+        rif:               r.cliente_rif,
+      },
+      vendedor:            r.vendedor ?? null,
+      fecha_emision:       r.fecha_emision,
+      fecha_vencimiento:   r.fecha_vencimiento,
+      total_pagar:         Number(r.total_pagar),
+      saldo_pendiente:     Number(r.saldo_pendiente),
+      dias_vencidos:       Number(r.dias_vencidos),
+      no_vencido:          Number(r.no_vencido),
+      d0_30:               Number(r.d0_30),
+      d30_60:              Number(r.d30_60),
+      d60_90:              Number(r.d60_90),
+      d_mas_90:            Number(r.d_mas_90),
+    }));
+  
+    const kpis = {
+      total_deuda:     facturas.reduce((s, f) => s + f.saldo_pendiente, 0),
+      total_vencido:   facturas.reduce((s, f) => s + f.d0_30 + f.d30_60 + f.d60_90 + f.d_mas_90, 0),
+      clientes_activos: new Set(facturas.map((f) => f.cliente.rif)).size,
+    };
+  
+    return { kpis, facturas };
+  }
+
+  async getReporteVentas(query: ReporteVentasQueryDto) {
+    const { id_empresa, fecha_inicio, fecha_fin, vendedor, marca, categoria } = query;
+  
+    const qb = this.dataSource.getRepository(FacturaDetalle)
+      .createQueryBuilder('d')
+      .innerJoin('d.factura',   'f')
+      .innerJoin('d.producto',  'p')
+      .leftJoin('f.vendedor',   'ven')
+      // Solo facturas de la empresa y que NO estén anuladas
+      .where('f.id_empresa = :id_empresa', { id_empresa })
+      .andWhere("f.estado != 'ANULADA'")
+      .select([
+        'd.id                                                  AS id_detalle',
+        'f.fecha_emision                                       AS fecha',
+        `CONCAT(f.serie, '-', LPAD(f.numero_consecutivo::text, 6, '0'))       AS nro_factura`,
+        'ven.nombre_apellido                                   AS vendedor',
+        'p.codigo                                              AS codigo',
+        'p.nombre                                              AS producto',
+        'p.marca                                               AS marca',
+        'p.categoria                                            AS categoria',
+        'd.cantidad                                            AS cantidad',
+  
+        // Costo histórico: guardado en el detalle al momento de facturar.
+        // Si tu entidad lo llama costo_unitario, ajusta aquí.
+        'd.costo_historico                                     AS costo_unitario',
+        'd.precio_unitario                                     AS precio_venta',
+        'd.total_linea                                         AS total_venta',
+  
+        // Ganancia y margen calculados en SQL (los costos NUNCA salen al frontend)
+        '(d.total_linea - d.costo_historico * d.cantidad)       AS ganancia',
+        `CASE
+           WHEN d.total_linea = 0 THEN 0
+           ELSE ROUND(
+             (d.total_linea - d.costo_historico * d.cantidad)
+             / d.total_linea * 100
+           , 2)
+         END                                                   AS margen_porcentaje`,
+  
+        'f.estado                                              AS estado',
+      ]);
+  
+    // ── Filtros opcionales ──────────────────────────────────────
+    if (fecha_inicio) {
+      qb.andWhere('f.fecha_emision >= :fecha_inicio', { fecha_inicio });
+    }
+    if (fecha_fin) {
+      // Incluir todo el día final
+      qb.andWhere('f.fecha_emision < :fecha_fin_excl', {
+        fecha_fin_excl: new Date(
+          new Date(fecha_fin).setDate(new Date(fecha_fin).getDate() + 1),
+        ).toISOString().split('T')[0],
+      });
+    }
+    if (vendedor) {
+      qb.andWhere('f.id_vendedor = :vendedor', { vendedor });
+    }
+    if (marca) {
+      qb.andWhere('p.marca = :marca', { marca });
+    }
+    if (categoria) {
+      qb.andWhere('p.categoria = :categoria', { categoria });;
+    }
+  
+    qb.orderBy('f.fecha_emision', 'DESC').addOrderBy('d.id', 'ASC')
+  
+    const rows = await qb.getRawMany();
+  
+    const lineas = rows.map((r) => ({
+      id_detalle:        r.id_detalle,
+      fecha:             r.fecha,
+      nro_factura:       r.nro_factura,
+      vendedor:          r.vendedor    ?? null,
+      codigo:            r.codigo,
+      producto:          r.producto,
+      marca:             r.marca       ?? null,
+      categoria:         r.categoria   ?? null,
+      cantidad:          Number(r.cantidad),
+      costo_total:       Number(r.costo_unitario) * Number(r.cantidad),
+      precio_venta:      Number(r.precio_venta),
+      total_venta:       Number(r.total_venta),
+      ganancia:          Number(r.ganancia),
+      margen_porcentaje: Number(r.margen_porcentaje),
+      estado:            r.estado,
+    }));
+  
+    // KPIs agregados en el service — el frontend solo renderiza
+    const kpis = {
+      total_venta:    lineas.reduce((s, l) => s + l.total_venta,   0),
+      total_costo:    lineas.reduce((s, l) => s + l.costo_total,   0),
+      total_ganancia: lineas.reduce((s, l) => s + l.ganancia,      0),
+      margen_global:
+        lineas.reduce((s, l) => s + l.total_venta, 0) === 0
+          ? 0
+          : Math.round(
+              (lineas.reduce((s, l) => s + l.ganancia,    0) /
+               lineas.reduce((s, l) => s + l.total_venta, 0)) * 10000,
+            ) / 100,
+    };
+  
+    return { kpis, lineas };
   }
 
   async findOne(id: string) {

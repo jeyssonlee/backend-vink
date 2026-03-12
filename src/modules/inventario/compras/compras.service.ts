@@ -1,13 +1,14 @@
 import { Injectable, Logger, ConflictException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CrearCompraDto } from './dto/crear-compra.dto';
-import { Compra } from './entities/compra.entity';
+import { Compra, FormaPago } from './entities/compra.entity';
 import { CompraDetalle } from './entities/compra-detalle.entity';
 import { Proveedor } from '../proveedores/entities/proveedor.entity';
 import { Empresa } from 'src/modules/core/empresa/entities/empresa.entity';
 import { Almacen } from '../almacenes/entities/almacen.entity';
 import { KardexService } from '../kardex/kardex.service';
 import { TipoMovimiento } from '../kardex/entities/movimiento-kardex.entity';
+import { CuentasPagarService } from 'src/modules/cuentas-pagar/cuentas-pagar.service';
 
 @Injectable()
 export class ComprasService {
@@ -16,6 +17,7 @@ export class ComprasService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly kardexService: KardexService,
+    private readonly cuentasPagarService: CuentasPagarService,
   ) {}
 
   // =================================================================
@@ -139,6 +141,10 @@ export class ComprasService {
       await queryRunner.manager.save(detallesEntidades);
       await queryRunner.commitTransaction();
       this.logger.log(`✅ Compra ${num_factura} registrada con Promedio Ponderado.`);
+
+      if (crearCompraDto.forma_pago === FormaPago.CREDITO) {
+        await this.cuentasPagarService.crearDesdeCompra(compraGuardada);
+      }
       
       return { success: true, data: compraGuardada };
 
@@ -238,7 +244,7 @@ export class ComprasService {
 
   async findAll() {
     return await this.dataSource.getRepository(Compra).find({
-      relations: ['proveedor', 'almacen', 'empresa']
+      relations: ['proveedor', 'almacen', 'empresa', 'detalles', 'detalles.producto']
     });
   }
 

@@ -9,10 +9,11 @@ import { JwtStrategy } from './jwt.strategy';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Rol } from './roles/entities/rol.entity';
 import { PermisosGuard } from './guards/permisos.guard';
+import {Vendedor} from 'src/modules/ventas/vendedores/entities/vendedor.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Usuario, Rol]),
+    TypeOrmModule.forFeature([Usuario, Rol, Vendedor]),
     PassportModule,
     ConfigModule,
     JwtModule.registerAsync({
