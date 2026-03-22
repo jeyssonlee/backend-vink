@@ -8,6 +8,7 @@ import { CategoriasModule } from '../categorias/categorias.module';
 import { TasaBcvModule } from '../tasa-bcv/tasa-bcv.module';
 import { PermisosGuard } from '../../auth/guards/permisos.guard';
 import { Rol } from '../../auth/roles/entities/rol.entity';
+import { TiposModule } from '../tipos/tipos.module';
 
 /**
  * Ubicación: src/modules/banco/importacion/
@@ -18,6 +19,7 @@ import { Rol } from '../../auth/roles/entities/rol.entity';
     TenantResolverModule,
     ParsersModule,
     CategoriasModule,
+    TiposModule,
     TasaBcvModule,
   ],
   controllers: [ImportacionController],

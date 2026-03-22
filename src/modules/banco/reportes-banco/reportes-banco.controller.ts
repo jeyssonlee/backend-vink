@@ -4,6 +4,7 @@ import {
   FiltrosReporteDto,
   FiltrosTopGastosDto,
   FiltrosComparativaDto,
+  FiltrosAgrupadoDto,
 } from './dto/reportes-banco.dto';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { PermisosGuard } from '../../auth/guards/permisos.guard';
@@ -14,6 +15,17 @@ import { Permiso } from '../../auth/permisos.enum';
 @UseGuards(JwtAuthGuard, PermisosGuard)
 export class ReportesBancoController {
   constructor(private readonly reportesService: ReportesBancoService) {}
+
+  /**
+   * GET /api/banco/reportes/agrupado
+   * Reporte drill-down: grupos con totales + movimientos anidados.
+   * tipo: POR_CATEGORIA | POR_MES | POR_SEMANA | POR_TIPO_DESTINO | POR_CUENTA
+   */
+  @Get('agrupado')
+  @Permisos(Permiso.VER_MOVIMIENTOS)
+  agrupado(@Query() filtros: FiltrosAgrupadoDto, @Request() req: any) {
+    return this.reportesService.reporteAgrupado(req.user.id_empresa, filtros);
+  }
 
   /**
    * GET /api/banco/reportes/flujo-caja

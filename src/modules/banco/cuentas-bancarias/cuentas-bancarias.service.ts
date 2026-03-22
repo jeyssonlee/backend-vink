@@ -61,6 +61,20 @@ import {
   
       return cuenta;
     }
+
+    async listarPorEmpresa(id_empresa_destino: string, id_empresa_solicitante: string) {
+      // Usa el schema del solicitante (holding) para acceder al tenant
+      const schema = await this.tenantResolver.resolverSchema(id_empresa_solicitante);
+    
+      const cuentas = await this.dataSource.query(
+        `SELECT * FROM "${schema}".cuenta_bancaria
+         WHERE id_empresa = $1 AND activa = TRUE
+         ORDER BY moneda, nombre`,
+        [id_empresa_destino],
+      );
+    
+      return cuentas;
+    }
   
     // ─────────────────────────────────────────────
     // CREAR

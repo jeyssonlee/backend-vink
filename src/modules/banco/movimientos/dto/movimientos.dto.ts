@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsIn, IsDateString, IsArray } from 'class-validator';
+import { IsOptional, IsString, IsIn, IsDateString, IsArray, IsBoolean, IsNumber, IsInt, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class FiltrosMovimientosDto {
@@ -56,4 +56,42 @@ export class FiltrosDashboardDto {
     return Array.isArray(value) ? value : [value];
   })
   empresas?: string[];
+}
+
+export class EditarMovimientoDto {
+  @IsDateString()
+  @IsOptional()
+  fecha?: string;
+
+  @IsString()
+  @IsOptional()
+  concepto?: string;
+
+  @IsOptional()
+  @IsIn([
+    'GASTO_OPERATIVO', 'COMPRA_INVENTARIO', 'PAGO_PROVEEDOR',
+    'NOMINA', 'TRANSFERENCIA_INTERNA', 'INGRESO_VENTAS', 'OTRO',
+  ])
+  tipo_destino?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value ? parseInt(value) : undefined)
+  id_categoria?: number;
+
+  @IsString()
+  @IsOptional()
+  notas?: string;
+
+  @IsNumber()
+  @IsOptional()
+  tasa_vigente?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  es_no_ventas?: boolean;
+
+  @IsOptional()
+  @ValidateIf((o) => o.id_subtipo !== null)
+  @IsInt()
+  id_subtipo?: number | null;
 }

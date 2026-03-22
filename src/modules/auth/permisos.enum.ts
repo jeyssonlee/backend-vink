@@ -85,4 +85,6 @@ export enum Permiso {
   IMPORTAR_EXTRACTOS = 'importar_extractos',
   VER_TASA_BCV = 'ver_tasa_bcv',
   EDITAR_TASA_BCV = 'editar_tasa_bcv',
+  VER_DASHBOARD_BANCO = "ver_dashboard_banco",
+  VER_MOVIMIENTOS_MANUALES = "ver_movimientos_manuales"
 }

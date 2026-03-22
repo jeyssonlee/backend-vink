@@ -55,7 +55,7 @@ export class UsuariosService {
   async listarPorEmpresa(idEmpresa: string): Promise<any[]> {
     const usuarios = await this.usuarioRepo.find({
       where: { id_empresa: idEmpresa },
-      relations: ['rol', 'sucursal'],
+      relations: ['rol', 'sucursal', 'empresa'],
       order: { fecha_creacion: 'DESC' }
     });
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { IBankParser, ResultadoParser } from './interfaces/bank-parser.interface';
 import { BancamigaParser } from '../parsers/bancamiga.parser';
+import { ExcelEstandarParser } from '../parsers/excel-estandar.parser';
 
 /**
  * Registro central de todos los parsers bancarios.
@@ -12,8 +13,14 @@ import { BancamigaParser } from '../parsers/bancamiga.parser';
  */
 @Injectable()
 export class BankParserRegistry {
+  /**
+   * Orden de detección: los parsers se evalúan en el orden del array.
+   * Poner los más específicos primero (Bancamiga detecta firmas HTML propias)
+   * y los genéricos al final (ExcelEstandar detecta por cabeceras de columna).
+   */
   private readonly parsers: IBankParser[] = [
-    new BancamigaParser(),
+    new BancamigaParser(),      // HTML .xls exportado desde el portal Bancamiga
+    new ExcelEstandarParser(),  // .xlsx estándar: FECHA|REFERENCIA|CONCEPTO|DEBITO|CREDITO|BANCO ORIGEN|EMPRESA
     // new BanescoParser(),
     // new VenezuelaParser(),
     // new MercantilParser(),

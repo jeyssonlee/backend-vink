@@ -17,7 +17,7 @@ export class OnboardingService {
     @InjectRepository(Rol)
     private readonly rolRepo: Repository<Rol>,
     private readonly dataSource: DataSource,
-    private readonly schemaProvisioning: SchemaProvisioningService, // ← nuevo
+    private readonly schemaProvisioning: SchemaProvisioningService,
   ) {}
 
   async crearEmpresaSimple(dto: OnboardingEmpresaDto) {
@@ -36,7 +36,7 @@ export class OnboardingService {
       });
       const empresaGuardada = await queryRunner.manager.save(empresa);
 
-      // 2. Crear sucursales
+      // 2. Crear sucursales y almacenes
       for (let i = 0; i < dto.empresa.sucursales.length; i++) {
         const s = dto.empresa.sucursales[i];
         const sucursal = queryRunner.manager.create(Sucursal, {
@@ -64,12 +64,10 @@ export class OnboardingService {
         }
       }
 
-      // 3. Crear usuario SUPER_ADMIN
-      await this.crearAdminUsuario(queryRunner, dto.admin, empresaGuardada);
+      // 3. Crear usuario SUPER_ADMIN (sin holding — empresa standalone)
+      await this.crearAdminUsuario(queryRunner, dto.admin, empresaGuardada, null);
 
-      // 4. Provisionar schema del tenant ← nuevo
-      //    Se ejecuta ANTES del commit, dentro de la misma transacción.
-      //    Si falla, todo (empresa + sucursales + usuario + schema) hace rollback.
+      // 4. Provisionar schema del tenant
       await this.schemaProvisioning.provisionTenant(
         queryRunner,
         'empresa',
@@ -153,12 +151,11 @@ export class OnboardingService {
         }
       }
 
-      // 3. Crear usuario SUPER_ADMIN
-      await this.crearAdminUsuario(queryRunner, dto.admin, primeraEmpresa!);
+      // 3. Crear SUPER_ADMIN con id_holding asignado y sin id_empresa
+      //    → verá todas las empresas del holding en el selector/switcher
+      await this.crearAdminUsuario(queryRunner, dto.admin, null, holdingGuardado);
 
-      // 4. Provisionar UN schema para el holding completo ← nuevo
-      //    Un holding = un schema compartido por todas sus empresas.
-      //    Cada empresa tiene su id_empresa en las tablas para filtrar.
+      // 4. Provisionar schema del holding
       await this.schemaProvisioning.provisionTenant(
         queryRunner,
         'holding',
@@ -188,13 +185,15 @@ export class OnboardingService {
   private async crearAdminUsuario(
     queryRunner: any,
     adminDto: any,
-    empresa: Empresa,
+    empresa: Empresa | null,
+    holding: Holding | null,
   ) {
     const rol = await this.rolRepo.findOne({ where: { nombre: 'SUPER_ADMIN' } });
-    if (!rol)
+    if (!rol) {
       throw new BadRequestException(
         'Rol SUPER_ADMIN no encontrado. Ejecuta la semilla primero.',
       );
+    }
 
     const claveHash = await bcrypt.hash(adminDto.clave, 10);
 
@@ -203,7 +202,10 @@ export class OnboardingService {
       correo: adminDto.correo,
       clave: claveHash,
       rol,
-      empresa,
+      empresa: empresa ?? undefined,
+      id_empresa: empresa?.id ?? null,          // ← FK explícito
+      holding: holding ?? undefined,
+      id_holding: holding?.id_holding ?? null,  // ← FK explícito
       activo: true,
     });
 

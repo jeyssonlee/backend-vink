@@ -39,6 +39,8 @@ import { ImportacionModule } from './modules/banco/importacion/importacion.modul
 import { MovimientosModule } from './modules/banco/movimientos/movimientos.module';
 import { DashboardBancoModule } from './modules/banco/dashboard-banco/dashboard-banco.module';
 import { ReportesBancoModule } from './modules/banco/reportes-banco/reportes-banco.module';
+import { MovimientoManualModule } from './modules/banco/movimientos-manuales/movimiento-manual.module';
+import { TiposModule } from './modules/banco/tipos/tipos.module';
 
 @Module({
   imports: [
@@ -106,7 +108,9 @@ import { ReportesBancoModule } from './modules/banco/reportes-banco/reportes-ban
     ImportacionModule,
     MovimientosModule,
     DashboardBancoModule,
-    ReportesBancoModule
+    ReportesBancoModule,
+    MovimientoManualModule,
+    TiposModule
      ],
 })
 export class AppModule {}

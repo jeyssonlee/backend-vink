@@ -42,6 +42,20 @@ import {
     obtener(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
       return this.cuentasService.obtener(id, req.user.id_empresa);
     }
+
+    /**
+ * GET /api/banco/cuentas/empresa/:id_empresa
+ * Lista las cuentas de una empresa específica del holding.
+ * Solo SUPER_ADMIN y ROOT.
+ */
+    @Get('empresa/:id_empresa')
+    @Permisos(Permiso.VER_CUENTAS_BANCARIAS)
+    listarPorEmpresa(
+    @Param('id_empresa') id_empresa_destino: string,
+    @Request() req: any,
+    ) {
+      return this.cuentasService.listarPorEmpresa(id_empresa_destino, req.user.id_empresa);
+    }
   
     /**
      * POST /api/banco/cuentas

@@ -23,18 +23,22 @@ export class DashboardBancoService {
     const [kpis, porCategoria, porTipoDestino, evolucionMensual, cuentas] = await Promise.all([
 
       // KPIs principales
+      // tiene_distribucion = FALSE: excluye el original distribuido, sus espejos
+      // (es_distribucion=TRUE) ya reflejan la porción correcta de la empresa.
+      // SIGN(monto): monto_usd se guarda siempre positivo, hay que reconstruir el signo.
       this.dataSource.query(
         `SELECT
-           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)      AS total_ingresos,
-           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)      AS total_egresos,
-           COALESCE(SUM(monto), 0)                               AS flujo_neto,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)  AS total_ingresos_usd,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0)  AS total_egresos_usd,
-           COALESCE(SUM(monto_usd), 0)                           AS flujo_neto_usd,
-           COUNT(*)::int                                          AS total_movimientos,
-           COUNT(*) FILTER (WHERE id_categoria IS NULL)::int      AS sin_categoria
+           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)                   AS total_ingresos,
+           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)                   AS total_egresos,
+           COALESCE(SUM(monto), 0)                                             AS flujo_neto,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)               AS total_ingresos_usd,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0)               AS total_egresos_usd,
+           COALESCE(SUM(monto_usd * SIGN(monto::numeric)), 0)                 AS flujo_neto_usd,
+           COUNT(*)::int                                                        AS total_movimientos,
+           COUNT(*) FILTER (WHERE id_categoria IS NULL)::int                   AS sin_categoria
          FROM "${schema}".movimiento_bancario
          WHERE id_empresa = $1
+           AND tiene_distribucion = FALSE
            ${fecha_desde ? `AND fecha >= '${fecha_desde}'` : ''}
            ${fecha_hasta ? `AND fecha <= '${fecha_hasta}'` : ''}`,
         [id_empresa],
@@ -50,6 +54,7 @@ export class DashboardBancoService {
          FROM "${schema}".movimiento_bancario m
          LEFT JOIN "${schema}".categoria_movimiento c ON c.id = m.id_categoria
          WHERE m.id_empresa = $1
+           AND m.tiene_distribucion = FALSE
            ${fecha_desde ? `AND m.fecha >= '${fecha_desde}'` : ''}
            ${fecha_hasta ? `AND m.fecha <= '${fecha_hasta}'` : ''}
          GROUP BY c.nombre
@@ -66,6 +71,7 @@ export class DashboardBancoService {
            SUM(monto_usd)                                  AS total_usd
          FROM "${schema}".movimiento_bancario
          WHERE id_empresa = $1
+           AND tiene_distribucion = FALSE
            ${fecha_desde ? `AND fecha >= '${fecha_desde}'` : ''}
            ${fecha_hasta ? `AND fecha <= '${fecha_hasta}'` : ''}
          GROUP BY tipo_destino
@@ -73,17 +79,19 @@ export class DashboardBancoService {
         [id_empresa],
       ),
 
-      // Evolución mensual — ingresos vs egresos por mes
+      // Evolución mensual
       this.dataSource.query(
         `SELECT
-           TO_CHAR(fecha, 'YYYY-MM')                          AS mes,
-           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)  AS ingresos,
-           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)  AS egresos,
-           COALESCE(SUM(monto), 0)                            AS flujo_neto,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0) AS ingresos_usd,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0) AS egresos_usd
+           TO_CHAR(fecha, 'YYYY-MM')                                           AS mes,
+           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)                   AS ingresos,
+           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)                   AS egresos,
+           COALESCE(SUM(monto), 0)                                             AS flujo_neto,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)               AS ingresos_usd,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0)               AS egresos_usd,
+           COALESCE(SUM(monto_usd * SIGN(monto::numeric)), 0)                 AS flujo_neto_usd
          FROM "${schema}".movimiento_bancario
          WHERE id_empresa = $1
+           AND tiene_distribucion = FALSE
            ${fecha_desde ? `AND fecha >= '${fecha_desde}'` : ''}
            ${fecha_hasta ? `AND fecha <= '${fecha_hasta}'` : ''}
          GROUP BY mes
@@ -91,7 +99,6 @@ export class DashboardBancoService {
         [id_empresa],
       ),
 
-      // Resumen por cuenta
       this.movimientosService.resumenPorCuenta(id_empresa, fecha_desde, fecha_hasta),
     ]);
 
@@ -115,14 +122,17 @@ export class DashboardBancoService {
     const schema = await this.tenantResolver.resolverSchema(id_empresa);
     const { fecha_desde, fecha_hasta, empresas } = filtros;
 
-    // Filtro por empresas seleccionadas (si viene vacío = todas)
     const filtroEmpresas = empresas && empresas.length > 0
       ? `AND id_empresa = ANY(ARRAY[${empresas.map(e => `'${e}'`).join(',')}])`
       : '';
 
+    // tiene_distribucion = FALSE: excluye originales distribuidos del consolidado.
+    // Los espejos (es_distribucion=TRUE) de cada empresa ya suman su porción correcta,
+    // evitando doble conteo en la vista del holding.
     const periodoFiltro = `
       ${fecha_desde ? `AND fecha >= '${fecha_desde}'` : ''}
       ${fecha_hasta ? `AND fecha <= '${fecha_hasta}'` : ''}
+      AND tiene_distribucion = FALSE
     `;
 
     const [kpisConsolidados, porEmpresa, evolucionMensual, topCategorias] = await Promise.all([
@@ -130,14 +140,13 @@ export class DashboardBancoService {
       // KPIs totales del grupo
       this.dataSource.query(
         `SELECT
-           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)      AS total_ingresos,
-           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)      AS total_egresos,
-           COALESCE(SUM(monto), 0)                               AS flujo_neto,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)  AS total_ingresos_usd,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0)  AS total_egresos_usd,
-           COALESCE(SUM(monto_usd), 0)                           AS flujo_neto_usd,
-           COUNT(*)::int                                          AS total_movimientos,
-           -- Excluye transferencias internas para no duplicar en P&L
+           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)                   AS total_ingresos,
+           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)                   AS total_egresos,
+           COALESCE(SUM(monto), 0)                                             AS flujo_neto,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)               AS total_ingresos_usd,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0)               AS total_egresos_usd,
+           COALESCE(SUM(monto_usd * SIGN(monto::numeric)), 0)                 AS flujo_neto_usd,
+           COUNT(*)::int                                                        AS total_movimientos,
            COALESCE(SUM(monto) FILTER (
              WHERE monto < 0 AND tipo_destino != 'TRANSFERENCIA_INTERNA'
            ), 0) AS egresos_reales
@@ -146,16 +155,17 @@ export class DashboardBancoService {
         [],
       ),
 
-      // KPIs por empresa — para comparativa
+      // KPIs por empresa
       this.dataSource.query(
         `SELECT
            id_empresa,
-           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)      AS ingresos,
-           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)      AS egresos,
-           COALESCE(SUM(monto), 0)                               AS flujo_neto,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)  AS ingresos_usd,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0)  AS egresos_usd,
-           COUNT(*)::int                                          AS total_movimientos
+           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)                   AS ingresos,
+           COALESCE(SUM(monto) FILTER (WHERE monto < 0), 0)                   AS egresos,
+           COALESCE(SUM(monto), 0)                                             AS flujo_neto,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)               AS ingresos_usd,
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto < 0), 0)               AS egresos_usd,
+           COALESCE(SUM(monto_usd * SIGN(monto::numeric)), 0)                 AS flujo_neto_usd,
+           COUNT(*)::int                                                        AS total_movimientos
          FROM "${schema}".movimiento_bancario
          WHERE TRUE ${filtroEmpresas} ${periodoFiltro}
          GROUP BY id_empresa
@@ -166,10 +176,11 @@ export class DashboardBancoService {
       // Evolución mensual consolidada
       this.dataSource.query(
         `SELECT
-           TO_CHAR(fecha, 'YYYY-MM')                             AS mes,
-           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)     AS ingresos,
+           TO_CHAR(fecha, 'YYYY-MM')                                           AS mes,
+           COALESCE(SUM(monto) FILTER (WHERE monto > 0), 0)                   AS ingresos,
            COALESCE(SUM(monto) FILTER (WHERE monto < 0 AND tipo_destino != 'TRANSFERENCIA_INTERNA'), 0) AS egresos_reales,
-           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0) AS ingresos_usd
+           COALESCE(SUM(monto_usd) FILTER (WHERE monto > 0), 0)               AS ingresos_usd,
+           COALESCE(SUM(monto_usd * SIGN(monto::numeric)), 0)                 AS flujo_neto_usd
          FROM "${schema}".movimiento_bancario
          WHERE TRUE ${filtroEmpresas} ${periodoFiltro}
          GROUP BY mes
@@ -178,6 +189,7 @@ export class DashboardBancoService {
       ),
 
       // Top categorías de gasto del grupo
+      // tiene_distribucion = FALSE explícito porque periodoFiltro usa alias m.fecha
       this.dataSource.query(
         `SELECT
            COALESCE(c.nombre, 'Sin Clasificar') AS categoria,
@@ -188,6 +200,7 @@ export class DashboardBancoService {
          LEFT JOIN "${schema}".categoria_movimiento c ON c.id = m.id_categoria
          WHERE m.monto < 0
            AND m.tipo_destino != 'TRANSFERENCIA_INTERNA'
+           AND m.tiene_distribucion = FALSE
            ${filtroEmpresas} ${periodoFiltro.replace(/AND fecha/g, 'AND m.fecha')}
          GROUP BY c.nombre
          ORDER BY SUM(m.monto) ASC

@@ -1,10 +1,4 @@
-import { IsString, IsEmail, IsUUID, IsOptional, MinLength, IsEnum, IsNotEmpty } from 'class-validator';
-
-export enum RolUsuario {
-  ADMIN = 'ADMIN',
-  VENDEDOR = 'VENDEDOR',
-  ALMACEN = 'ALMACEN',
-}
+import { IsString, IsEmail, IsUUID, IsOptional, MinLength, IsNotEmpty } from 'class-validator';
 
 export class CrearUsuarioDto {
   @IsString()
@@ -19,9 +13,9 @@ export class CrearUsuarioDto {
   @MinLength(6, { message: 'La clave debe tener al menos 6 caracteres' })
   clave: string;
 
-  @IsEnum(RolUsuario)
+  @IsString()
   @IsOptional()
-  rol?: RolUsuario; // Si no se envía, asignar default en Service
+  rol?: string;
 
   @IsUUID('4')
   @IsNotEmpty()
@@ -29,5 +23,5 @@ export class CrearUsuarioDto {
 
   @IsUUID('4')
   @IsOptional()
-  id_sucursal: string; // Faltaba vincularlo a una sucursal física
+  id_sucursal?: string;
 }

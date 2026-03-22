@@ -17,6 +17,10 @@ export class EditarStagingDto {
   @IsOptional()
   id_categoria?: number;
 
+  @IsNumber()
+  @IsOptional()
+  id_subtipo?: number | null;
+
   @IsString()
   @IsOptional()
   tipo_destino?: string;
@@ -27,7 +31,11 @@ export class EditarStagingDto {
 
   @IsBoolean()
   @IsOptional()
-  excluir?: boolean; // marcar para no consolidar
+  excluir?: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  tasa_vigente?: number;
 }
 
 export class DistribucionDto {
@@ -50,4 +58,8 @@ export class DistribucionItemDto {
   @IsNumber()
   @IsOptional()
   porcentaje?: number;
+
+  @IsNumber()
+  @IsOptional()
+  id_cuenta?: number;
 }

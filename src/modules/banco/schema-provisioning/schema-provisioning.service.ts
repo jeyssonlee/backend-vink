@@ -5,20 +5,10 @@ import { QueryRunner } from 'typeorm';
 export class SchemaProvisioningService {
   private readonly logger = new Logger(SchemaProvisioningService.name);
 
-  /**
-   * Genera el nombre del schema para un tenant.
-   * Holding:  tenant_h{id}
-   * Empresa:  tenant_e{id}
-   */
   static schemaName(tipo: 'holding' | 'empresa', id: string | number): string {
     return tipo === 'holding' ? `tenant_h${id}` : `tenant_e${id}`;
   }
 
-  /**
-   * Crea el schema y todas las tablas base del tenant.
-   * Se ejecuta DENTRO del QueryRunner activo, antes del commit.
-   * Si falla, la transacción completa hace rollback (DDL es transaccional en PostgreSQL).
-   */
   async provisionTenant(
     queryRunner: QueryRunner,
     tipo: 'holding' | 'empresa',
@@ -30,8 +20,8 @@ export class SchemaProvisioningService {
     await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
 
     await this.crearTablasCuentasBancarias(queryRunner, schema);
-    await this.crearTablasMovimientos(queryRunner, schema);
     await this.crearTablasCategorias(queryRunner, schema);
+    await this.crearTablasMovimientos(queryRunner, schema);
     await this.crearTablasImportacion(queryRunner, schema);
 
     await this.sembrarCategoriasDefault(queryRunner, schema);
@@ -55,7 +45,7 @@ export class SchemaProvisioningService {
         moneda            VARCHAR(3)      NOT NULL DEFAULT 'VES'
                             CHECK (moneda IN ('VES','USD')),
         banco_key         VARCHAR(50)     NOT NULL,
-        id_empresa        INTEGER         NOT NULL,
+        id_empresa        UUID            NOT NULL,
         activa            BOOLEAN         NOT NULL DEFAULT TRUE,
         saldo_inicial     NUMERIC(18,2)   NOT NULL DEFAULT 0,
         created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
@@ -69,7 +59,6 @@ export class SchemaProvisioningService {
     qr: QueryRunner,
     schema: string,
   ): Promise<void> {
-    // Tipo destino — enum como dominio PostgreSQL
     await qr.query(`
       DO $$ BEGIN
         CREATE TYPE "${schema}".tipo_destino_enum AS ENUM (
@@ -93,16 +82,23 @@ export class SchemaProvisioningService {
         fecha             DATE            NOT NULL,
         concepto          TEXT            NOT NULL,
         referencia        VARCHAR(100),
-        monto             NUMERIC(18,2)   NOT NULL,  -- positivo=ingreso, negativo=egreso
+        monto             NUMERIC(18,2)   NOT NULL,
         moneda            VARCHAR(3)      NOT NULL DEFAULT 'VES',
-        tasa_vigente      NUMERIC(10,4),             -- tasa BCV aplicada
-        monto_usd         NUMERIC(18,2),             -- monto convertido
+        tasa_vigente      NUMERIC(10,4),
+        monto_usd         NUMERIC(18,2),
+        id_tipo           INTEGER,
+        id_subtipo        INTEGER,
         id_categoria      INTEGER,
         tipo_destino      "${schema}".tipo_destino_enum,
         es_no_ventas      BOOLEAN         NOT NULL DEFAULT FALSE,
+        es_distribucion   BOOLEAN         NOT NULL DEFAULT FALSE,
+        -- Marca el movimiento original que fue repartido entre empresas.
+        -- Se excluye de KPIs y saldos; se muestra en la tabla resaltado en amarillo.
+        tiene_distribucion BOOLEAN        NOT NULL DEFAULT FALSE,
+        id_origen         INTEGER,
         hash_dedup        VARCHAR(64)     NOT NULL,
         id_importacion    INTEGER,
-        id_empresa        INTEGER         NOT NULL,
+        id_empresa        UUID            NOT NULL,
         notas             TEXT,
         created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
         updated_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
@@ -110,7 +106,6 @@ export class SchemaProvisioningService {
       )
     `);
 
-    // Índices de consulta frecuente
     await qr.query(`
       CREATE INDEX IF NOT EXISTS idx_mov_fecha
         ON "${schema}".movimiento_bancario (fecha DESC)
@@ -120,14 +115,42 @@ export class SchemaProvisioningService {
         ON "${schema}".movimiento_bancario (id_empresa, fecha DESC)
     `);
 
-    // Distribución de egresos entre empresas del grupo
+    await qr.query(`
+      CREATE TABLE IF NOT EXISTS "${schema}".movimiento_manual (
+        id               SERIAL PRIMARY KEY,
+        fecha            DATE            NOT NULL,
+        tipo             VARCHAR(10)     NOT NULL CHECK (tipo IN ('INGRESO', 'EGRESO')),
+        id_tipo          INTEGER,
+        id_subtipo       INTEGER,
+        id_cuenta        INTEGER         REFERENCES "${schema}".cuenta_bancaria(id) ON DELETE SET NULL,
+        es_efectivo      BOOLEAN         NOT NULL DEFAULT FALSE,
+        id_categoria     INTEGER         REFERENCES "${schema}".categoria_movimiento(id) ON DELETE SET NULL,
+        descripcion      TEXT,
+        monto_usd        NUMERIC(18,2)   NOT NULL,
+        tasa_vigente     NUMERIC(12,4),
+        monto_bs         NUMERIC(18,2),
+        id_empresa       UUID            NOT NULL,
+        created_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await qr.query(`
+      CREATE INDEX IF NOT EXISTS idx_movimiento_manual_empresa
+        ON "${schema}".movimiento_manual (id_empresa)
+    `);
+    await qr.query(`
+      CREATE INDEX IF NOT EXISTS idx_movimiento_manual_fecha
+        ON "${schema}".movimiento_manual (fecha DESC)
+    `);
+
     await qr.query(`
       CREATE TABLE IF NOT EXISTS "${schema}".movimiento_distribucion (
         id                SERIAL PRIMARY KEY,
         id_movimiento     INTEGER         NOT NULL
                             REFERENCES "${schema}".movimiento_bancario(id)
                             ON DELETE CASCADE,
-        id_empresa        INTEGER         NOT NULL,
+        id_empresa        UUID            NOT NULL,
         monto             NUMERIC(18,2)   NOT NULL,
         porcentaje        NUMERIC(5,2),
         notas             TEXT,
@@ -141,32 +164,53 @@ export class SchemaProvisioningService {
     schema: string,
   ): Promise<void> {
     await qr.query(`
+      CREATE TABLE IF NOT EXISTS "${schema}".tipo_movimiento (
+        id          SERIAL PRIMARY KEY,
+        nombre      VARCHAR(60)   NOT NULL,
+        descripcion TEXT,
+        es_sistema  BOOLEAN       NOT NULL DEFAULT FALSE,
+        activo      BOOLEAN       NOT NULL DEFAULT TRUE,
+        created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+        UNIQUE (nombre)
+      )
+    `);
+
+    await qr.query(`
+      CREATE TABLE IF NOT EXISTS "${schema}".subtipo_movimiento (
+        id          SERIAL PRIMARY KEY,
+        id_tipo     INTEGER       NOT NULL
+                      REFERENCES "${schema}".tipo_movimiento(id) ON DELETE CASCADE,
+        nombre      VARCHAR(80)   NOT NULL,
+        descripcion TEXT,
+        activo      BOOLEAN       NOT NULL DEFAULT TRUE,
+        created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+        UNIQUE (id_tipo, nombre)
+      )
+    `);
+
+    await qr.query(`
       CREATE TABLE IF NOT EXISTS "${schema}".categoria_movimiento (
-        id                SERIAL PRIMARY KEY,
-        nombre            VARCHAR(80)     NOT NULL,
-        descripcion       TEXT,
-        activa            BOOLEAN         NOT NULL DEFAULT TRUE,
-        created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+        id          SERIAL PRIMARY KEY,
+        nombre      VARCHAR(80)   NOT NULL,
+        descripcion TEXT,
+        id_subtipo  INTEGER
+                      REFERENCES "${schema}".subtipo_movimiento(id) ON DELETE SET NULL,
+        activa      BOOLEAN       NOT NULL DEFAULT TRUE,
+        created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+        UNIQUE (nombre)
       )
     `);
 
     await qr.query(`
       CREATE TABLE IF NOT EXISTS "${schema}".regla_categoria (
-        id                SERIAL PRIMARY KEY,
-        id_categoria      INTEGER         NOT NULL
-                            REFERENCES "${schema}".categoria_movimiento(id)
-                            ON DELETE CASCADE,
-        palabra_clave     VARCHAR(100)    NOT NULL,
-        activa            BOOLEAN         NOT NULL DEFAULT TRUE,
-        created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+        id            SERIAL PRIMARY KEY,
+        id_categoria  INTEGER       NOT NULL
+                        REFERENCES "${schema}".categoria_movimiento(id) ON DELETE CASCADE,
+        palabra_clave VARCHAR(80)   NOT NULL,
+        activa        BOOLEAN       NOT NULL DEFAULT TRUE,
+        created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
         UNIQUE (id_categoria, palabra_clave)
       )
-    `);
-
-    await qr.query(`
-      CREATE INDEX IF NOT EXISTS idx_regla_categoria
-        ON "${schema}".regla_categoria (id_categoria)
-        WHERE activa = TRUE
     `);
   }
 
@@ -174,7 +218,6 @@ export class SchemaProvisioningService {
     qr: QueryRunner,
     schema: string,
   ): Promise<void> {
-    // Estado del lote de importación
     await qr.query(`
       DO $$ BEGIN
         CREATE TYPE "${schema}".importacion_estado_enum AS ENUM (
@@ -199,13 +242,12 @@ export class SchemaProvisioningService {
         total_filas       INTEGER,
         filas_nuevas      INTEGER,
         filas_duplicadas  INTEGER,
-        id_usuario        INTEGER         NOT NULL,
+        id_usuario        UUID            NOT NULL,
         created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
         updated_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW()
       )
     `);
 
-    // Staging — filas crudas del Excel antes de consolidar
     await qr.query(`
       CREATE TABLE IF NOT EXISTS "${schema}".bank_transactions_staging (
         id                SERIAL PRIMARY KEY,
@@ -219,39 +261,42 @@ export class SchemaProvisioningService {
         monto             NUMERIC(18,2),
         hash_dedup        VARCHAR(64),
         es_duplicado      BOOLEAN         NOT NULL DEFAULT FALSE,
+        id_tipo           INTEGER,
+        id_subtipo        INTEGER,
         id_categoria      INTEGER,
         tipo_destino      VARCHAR(30),
         notas             TEXT,
         procesado         BOOLEAN         NOT NULL DEFAULT FALSE,
+        tasa_vigente      NUMERIC(18,4),
+        monto_usd         NUMERIC(18,2),
         created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW()
       )
     `);
 
-    // Distribuciones en staging (para prorrateo multi-empresa en el wizard)
     await qr.query(`
       CREATE TABLE IF NOT EXISTS "${schema}".staging_distributions (
         id                SERIAL PRIMARY KEY,
         id_staging        INTEGER         NOT NULL
                             REFERENCES "${schema}".bank_transactions_staging(id)
                             ON DELETE CASCADE,
-        id_empresa        INTEGER         NOT NULL,
+        id_empresa        UUID            NOT NULL,
         monto             NUMERIC(18,2)   NOT NULL,
         porcentaje        NUMERIC(5,2),
+        id_cuenta         INTEGER,
         created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW()
       )
     `);
 
-    // Conciliación (estructura base — se expande en Sprint 5)
     await qr.query(`
       CREATE TABLE IF NOT EXISTS "${schema}".conciliacion_cobranza (
         id                SERIAL PRIMARY KEY,
         id_movimiento     INTEGER
                             REFERENCES "${schema}".movimiento_bancario(id),
-        id_factura        INTEGER,          -- referencia a módulo de ventas
-        monto_conciliado  NUMERIC(18,2)    NOT NULL,
-        fecha             DATE             NOT NULL,
+        id_factura        INTEGER,
+        monto_conciliado  NUMERIC(18,2)   NOT NULL,
+        fecha             DATE            NOT NULL,
         notas             TEXT,
-        created_at        TIMESTAMPTZ      NOT NULL DEFAULT NOW()
+        created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW()
       )
     `);
   }
@@ -260,104 +305,98 @@ export class SchemaProvisioningService {
   // SEMILLA DE CATEGORÍAS DEFAULT
   // ─────────────────────────────────────────────
 
-  /**
-   * Inserta las categorías base con sus palabras clave al crear el tenant.
-   * Basado en los conceptos reales del extracto Bancamiga.
-   *
-   * Categorías con auto-match:   Ingresos por Ventas, Comisiones Bancarias,
-   *                               Impuestos, Servicios Públicos.
-   * Categorías sin palabras clave (clasificación manual en wizard):
-   *                               Pago a Proveedores, Nómina, Transferencia Interna.
-   */
   private async sembrarCategoriasDefault(
     qr: QueryRunner,
     schema: string,
   ): Promise<void> {
-    const categorias: { nombre: string; descripcion: string; palabras: string[] }[] = [
+    const [tipoIngreso] = await qr.query(
+      `INSERT INTO "${schema}".tipo_movimiento (nombre, descripcion, es_sistema)
+       VALUES ('INGRESO', 'Entradas de dinero a la cuenta', TRUE)
+       RETURNING id`,
+    );
+    const [tipoEgreso] = await qr.query(
+      `INSERT INTO "${schema}".tipo_movimiento (nombre, descripcion, es_sistema)
+       VALUES ('EGRESO', 'Salidas de dinero de la cuenta', TRUE)
+       RETURNING id`,
+    );
+
+    const [stIngresosOp] = await qr.query(
+      `INSERT INTO "${schema}".subtipo_movimiento (id_tipo, nombre, descripcion)
+       VALUES ($1, 'Ingresos Operacionales', 'Cobros propios de la actividad comercial')
+       RETURNING id`,
+      [tipoIngreso.id],
+    );
+    const [stGastos] = await qr.query(
+      `INSERT INTO "${schema}".subtipo_movimiento (id_tipo, nombre, descripcion)
+       VALUES ($1, 'Gastos', 'Pagos y salidas relacionadas con la operación')
+       RETURNING id`,
+      [tipoEgreso.id],
+    );
+    const [stImpuestos] = await qr.query(
+      `INSERT INTO "${schema}".subtipo_movimiento (id_tipo, nombre, descripcion)
+       VALUES ($1, 'Impuestos y Tributos', 'Pagos al SENIAT y otros organismos')
+       RETURNING id`,
+      [tipoEgreso.id],
+    );
+
+    const categorias: { nombre: string; descripcion: string; id_subtipo: number | null; palabras: string[] }[] = [
       {
         nombre: 'Ingresos por Ventas',
         descripcion: 'Cobros de clientes, transferencias recibidas y créditos inmediatos',
-        palabras: [
-          'nc transf',
-          'nc fondos',
-          'nc credito',
-          'credito inmediato',
-          'fondos recib',
-          'transf. distinto cliente',
-          'transf. internet terceros',
-          'pago movil',
-        ],
+        id_subtipo: stIngresosOp.id,
+        palabras: ['nc transf', 'nc fondos', 'nc credito', 'credito inmediato',
+                   'fondos recib', 'transf. distinto cliente', 'transf. internet terceros', 'pago movil'],
       },
       {
         nombre: 'Comisiones Bancarias',
         descripcion: 'Comisiones y cargos del banco por operaciones',
-        palabras: [
-          'comision',
-          'comisión',
-          'comisi',
-        ],
+        id_subtipo: stGastos.id,
+        palabras: ['comision', 'comisión', 'comisi'],
       },
       {
         nombre: 'Impuestos',
         descripcion: 'Pagos al SENIAT y organismos tributarios',
-        palabras: [
-          'seniat',
-          'pagos web',
-          'impuesto',
-          'igtf',
-          'iva',
-        ],
+        id_subtipo: stImpuestos.id,
+        palabras: ['seniat', 'pagos web', 'impuesto', 'igtf', 'iva'],
       },
       {
         nombre: 'Servicios Públicos',
         descripcion: 'Electricidad, agua, aseo y otros servicios básicos',
-        palabras: [
-          'corpoelec',
-          'energia',
-          'aseo',
-          'relleno',
-          'hidrolago',
-          'hidrocapital',
-          'cantv',
-          'movilnet',
-        ],
+        id_subtipo: stGastos.id,
+        palabras: ['corpoelec', 'energia', 'aseo', 'relleno', 'hidrolago', 'hidrocapital', 'cantv', 'movilnet'],
       },
       {
         nombre: 'Pago a Proveedores',
         descripcion: 'Transferencias enviadas a proveedores de bienes y servicios',
-        palabras: [], // clasificación manual en el wizard
+        id_subtipo: stGastos.id,
+        palabras: [],
       },
       {
         nombre: 'Nómina',
         descripcion: 'Pago de sueldos y salarios al personal',
-        palabras: [
-          'nomina',
-          'nómina',
-          'sueldo',
-          'salario',
-        ],
+        id_subtipo: stGastos.id,
+        palabras: ['nomina', 'nómina', 'sueldo', 'salario'],
       },
       {
         nombre: 'Transferencia Interna',
         descripcion: 'Movimientos entre empresas del mismo grupo (no afectan P&L consolidado)',
-        palabras: [
-          'transferencia interna',
-          'transf interna',
-        ],
+        id_subtipo: null,
+        palabras: ['transferencia interna', 'transf interna'],
       },
       {
         nombre: 'Sin Clasificar',
         descripcion: 'Movimientos pendientes de revisión y clasificación',
-        palabras: [], // catch-all manual
+        id_subtipo: null,
+        palabras: [],
       },
     ];
 
     for (const cat of categorias) {
       const [nueva] = await qr.query(
-        `INSERT INTO "${schema}".categoria_movimiento (nombre, descripcion)
-         VALUES ($1, $2)
+        `INSERT INTO "${schema}".categoria_movimiento (nombre, descripcion, id_subtipo)
+         VALUES ($1, $2, $3)
          RETURNING id`,
-        [cat.nombre, cat.descripcion],
+        [cat.nombre, cat.descripcion, cat.id_subtipo ?? null],
       );
 
       for (const palabra of cat.palabras) {

@@ -18,18 +18,36 @@ export class SemillaService {
   ) {}
 
   async ejecutarSemilla() {
-    this.logger.log('🚀 PASO 0: Limpiando Base de Datos...');
-
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
 
     try {
+      // ── PASO 0A: Eliminar schemas de tenant (tenant_h* y tenant_e*) ──────────
+      this.logger.log('🚀 PASO 0A: Eliminando schemas de tenant...');
+
+      const schemas = await queryRunner.query(`
+        SELECT schema_name
+        FROM information_schema.schemata
+        WHERE schema_name LIKE 'tenant_%'
+      `);
+
+      for (const { schema_name } of schemas) {
+        await queryRunner.query(`DROP SCHEMA IF EXISTS "${schema_name}" CASCADE`);
+        this.logger.log(`   🗑️  Schema eliminado: ${schema_name}`);
+      }
+
+      this.logger.log(`✅ ${schemas.length} schema(s) de tenant eliminados.`);
+
+      // ── PASO 0B: Limpiar tablas principales ───────────────────────────────────
+      this.logger.log('🚀 PASO 0B: Limpiando tablas principales...');
+
       await queryRunner.query(`
-        TRUNCATE TABLE 
-          usuarios, roles, almacenes, 
-          sucursales, empresas, holdings 
+        TRUNCATE TABLE
+          usuarios, roles, almacenes,
+          sucursales, empresas, holdings
         RESTART IDENTITY CASCADE;
       `);
+
       this.logger.log('✅ Base de datos limpia.');
     } catch (error) {
       this.logger.error('⚠️ Error al limpiar: ' + error.message);
@@ -57,36 +75,28 @@ export class SemillaService {
           nombre: 'VENTAS',
           descripcion: 'Gestión de ventas, pedidos, clientes e inventario',
           permisos: [
-            // Ventas
             Permiso.VER_VENTAS,
             Permiso.CREAR_VENTAS,
             Permiso.VER_REPORTES_VENTAS,
-            // Pedidos — ciclo completo de revisión y facturación
             Permiso.VER_PEDIDOS,
             Permiso.CREAR_PEDIDOS,
             Permiso.EDITAR_PEDIDOS,
             Permiso.REVISAR_PEDIDOS,
             Permiso.FACTURAR_PEDIDOS,
-            // Clientes
             Permiso.VER_CLIENTES,
             Permiso.CREAR_CLIENTES,
             Permiso.EDITAR_CLIENTES,
             Permiso.VER_PERFIL_CLIENTE,
-            // Inventario y productos
             Permiso.VER_INVENTARIO,
             Permiso.VER_PRODUCTOS,
             Permiso.VER_KARDEX,
             Permiso.VER_INVENTARIO_VALORIZADO,
-            // Compras y proveedores
             Permiso.VER_COMPRAS,
             Permiso.CREAR_COMPRAS,
             Permiso.VER_PROVEEDORES,
             Permiso.VER_REPORTES_COMPRAS,
-            // Almacenes
             Permiso.VER_ALMACENES,
-            // Vendedores
             Permiso.VER_VENDEDORES,
-            // CXC
             Permiso.VER_CXC,
           ],
         },
@@ -137,16 +147,11 @@ export class SemillaService {
           nombre: 'VENDEDOR',
           descripcion: 'Vendedor de campo — web y app móvil',
           permisos: [
-            // Pedidos — crear y enviar (no revisar ni facturar)
             Permiso.VER_PEDIDOS,
             Permiso.CREAR_PEDIDOS,
-            // Clientes — solo cartera básica, sin perfil 360
             Permiso.VER_CLIENTES,
-            // Cobranza — solo ver y registrar
             Permiso.VER_COBRANZAS,
-            // Inventario — solo consulta de stock disponible
             Permiso.VER_INVENTARIO,
-            // CXC — para ver saldos del cliente
             Permiso.VER_CXC,
           ],
         },

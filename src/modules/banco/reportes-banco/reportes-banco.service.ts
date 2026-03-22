@@ -5,6 +5,8 @@ import {
   FiltrosReporteDto,
   FiltrosTopGastosDto,
   FiltrosComparativaDto,
+  FiltrosAgrupadoDto,
+  TipoAgrupadoReporte,
 } from './dto/reportes-banco.dto';
 
 @Injectable()
@@ -13,6 +15,108 @@ export class ReportesBancoService {
     private readonly dataSource: DataSource,
     private readonly tenantResolver: TenantResolverService,
   ) {}
+
+  // ─────────────────────────────────────────────
+  // 0. REPORTE AGRUPADO (DRILL-DOWN)
+  // ─────────────────────────────────────────────
+
+  async reporteAgrupado(id_empresa: string, filtros: FiltrosAgrupadoDto) {
+    const schema   = await this.tenantResolver.resolverSchema(id_empresa);
+    const { fecha_desde, fecha_hasta, tipo, tipo_movimiento } = filtros;
+    const periodoFiltro = this.buildPeriodoFiltro(fecha_desde, fecha_hasta);
+
+    const filtroMonto = tipo_movimiento === 'INGRESO'
+      ? 'AND m.monto > 0'
+      : tipo_movimiento === 'EGRESO'
+        ? 'AND m.monto < 0'
+        : '';
+
+    const { groupExpr, labelExpr, orderExpr } = this.buildGroupExpr(tipo);
+
+    const rows = await this.dataSource.query(
+      `SELECT
+         ${groupExpr}                                          AS grupo_key,
+         ${labelExpr}                                         AS grupo_label,
+         COUNT(m.id)::int                                     AS cantidad,
+         COALESCE(SUM(m.monto), 0)                            AS total_bs,
+         COALESCE(SUM(m.monto * SIGN(m.monto::numeric)), 0)   AS total_bs_abs,
+         COALESCE(SUM(
+           m.monto_usd * SIGN(m.monto::numeric)
+         ), 0)                                                AS total_usd,
+         JSON_AGG(
+           JSON_BUILD_OBJECT(
+             'id',         m.id,
+             'fecha',      m.fecha,
+             'concepto',   m.concepto,
+             'referencia', m.referencia,
+             'monto',      m.monto,
+             'monto_usd',  m.monto_usd,
+             'notas',      m.notas,
+             'categoria',  COALESCE(cat.nombre, 'Sin categoría'),
+             'cuenta',     cb.nombre,
+             'tipo_destino', m.tipo_destino
+           )
+           ORDER BY m.fecha DESC
+         )                                                    AS movimientos
+       FROM "${schema}".movimiento_bancario m
+       LEFT JOIN "${schema}".categoria_movimiento cat ON cat.id = m.id_categoria
+       LEFT JOIN "${schema}".cuenta_bancaria       cb  ON cb.id  = m.id_cuenta
+       WHERE m.id_empresa = $1
+         AND m.tiene_distribucion = FALSE
+         ${filtroMonto}
+         ${periodoFiltro}
+       GROUP BY grupo_key, grupo_label
+       ORDER BY ${orderExpr}`,
+      [id_empresa],
+    );
+
+    return {
+      reporte:         'AGRUPADO',
+      tipo,
+      tipo_movimiento: tipo_movimiento ?? 'TODOS',
+      periodo:         { fecha_desde, fecha_hasta },
+      grupos:          rows,
+    };
+  }
+
+  private buildGroupExpr(tipo: TipoAgrupadoReporte): {
+    groupExpr: string;
+    labelExpr: string;
+    orderExpr: string;
+  } {
+    switch (tipo) {
+      case 'POR_CATEGORIA':
+        return {
+          groupExpr: "COALESCE(cat.nombre, 'Sin categoría')",
+          labelExpr: "COALESCE(cat.nombre, 'Sin categoría')",
+          orderExpr: 'total_bs_abs DESC',
+        };
+      case 'POR_MES':
+        return {
+          groupExpr: "TO_CHAR(m.fecha, 'YYYY-MM')",
+          labelExpr: "TO_CHAR(DATE_TRUNC('month', m.fecha), 'Mon YYYY')",
+          orderExpr: 'grupo_key ASC',
+        };
+      case 'POR_SEMANA':
+        return {
+          groupExpr: "TO_CHAR(DATE_TRUNC('week', m.fecha), 'YYYY-MM-DD')",
+          labelExpr: "CONCAT('Semana del ', TO_CHAR(DATE_TRUNC('week', m.fecha), 'DD Mon YYYY'))",
+          orderExpr: 'grupo_key ASC',
+        };
+      case 'POR_TIPO_DESTINO':
+        return {
+          groupExpr: "COALESCE(m.tipo_destino::text, 'SIN_CLASIFICAR')",
+          labelExpr: "COALESCE(m.tipo_destino::text, 'Sin clasificar')",
+          orderExpr: 'total_bs_abs DESC',
+        };
+      case 'POR_CUENTA':
+        return {
+          groupExpr: 'cb.nombre',
+          labelExpr: 'cb.nombre',
+          orderExpr: 'total_bs_abs DESC',
+        };
+    }
+  }
 
   // ─────────────────────────────────────────────
   // 1. FLUJO DE CAJA POR PERÍODO
@@ -188,8 +292,9 @@ export class ReportesBancoService {
            COALESCE(SUM(ABS(monto_usd)), 0)                     AS monto_total_usd
          FROM "${schema}".movimiento_bancario
          WHERE id_empresa = $1
-           AND id_categoria IS NULL
-           ${periodoFiltro}`,
+          AND id_categoria IS NULL
+          AND (tipo_destino IS NULL OR tipo_destino != 'TRANSFERENCIA_INTERNA')
+              ${periodoFiltro}`,
         [id_empresa],
       ),
 
@@ -201,8 +306,9 @@ export class ReportesBancoService {
          FROM "${schema}".movimiento_bancario m
          LEFT JOIN "${schema}".cuenta_bancaria cb ON cb.id = m.id_cuenta
          WHERE m.id_empresa = $1
-           AND m.id_categoria IS NULL
-           ${periodoFiltro}
+            AND m.id_categoria IS NULL
+            AND (m.tipo_destino IS NULL OR m.tipo_destino != 'TRANSFERENCIA_INTERNA')
+              ${periodoFiltro}
          ORDER BY m.fecha DESC`,
         [id_empresa],
       ),
